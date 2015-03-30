@@ -75,8 +75,8 @@ my $usage = "\nUsage [$version]:
     Available at: https://github.com/arq5x/bedtools2
     
    CITATION - please cite in the Methods:
-      - For this pipeline using -gtf, cite Kapusta et al. (2013) PLoS Genetics
-      - For this pipeline using -bed, cite Lynch et al. (2015) Cell Reports
+      - For this pipeline using -f gtf, cite Kapusta et al. (2013) PLoS Genetics
+      - For this pipeline using -f bed, cite Lynch et al. (2015) Cell Reports
       - For the use of BEDtools, Quinlan AR and Hall IM (2010) Bioinformatics
       
    DEBUGGING
