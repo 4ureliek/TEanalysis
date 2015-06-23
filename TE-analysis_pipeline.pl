@@ -87,13 +87,14 @@ my $usage = "\nUsage [$version]:
    DETAILS OF OPTIONS (MD = mandatory and OPT = optional):
     -i         => MD  - (STRING) input file
     -dir       => OPT - (BOOL) add this if -i corresponds to a folder containing files to work with (need to contain ONLY these files!!)
-    -f         => MD  - (STRING) format of the input file: gtf or bed / type of analysis (check -help for more information)
+    -f         => MD  - (STRING) This means more type of analysis than format of the input file.
+                         chose between -f gtf or -f bed (check -help for more information)
                          gtf (default) = complex analysis (for transcripts - TSS, exons, splicing sites, etc)
                          bed = simple analysis (for TF binding sites, ChIP-seq data etc)
                                5 columns bedfile is required: chr start end unique_ID score/. strand                        
-    -myf       => OPT - (STRING) if input file is not gtf or bed: use a text file to set column numbers.
+    -myf       => OPT - (STRING) if input file is not formated as a gtf/gff3 or bed: use this option with a text file to set the column numbers.
                          You still need to provide -f to determine the type of analysis.
-                         To generate an example file, type this option alone (with the path/name of the file to create)
+                         To generate an example of the text file to provide, type this option alone (with the path/name of the file to create)
     -RMout     => MD  - (STRING) repeat masker output file .out
                          Even if you already have the .out.bed file, put .out in command line
                          Obviously requires to be for the same assembly file/version than the input file (ex. mm9 or mm10, hg19 or hg38, etc)
