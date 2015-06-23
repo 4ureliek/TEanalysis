@@ -7,25 +7,25 @@ Last update  :  Mars 2015
 
 	perl TE-analysis_pipeline_v4+.pl -i <inputfile> [-dir] -f <format> [-myf <col_details.txt>] -RMout <RepeatMasker.out> [-RMparsed RM.out.parsed] [-base <RM base>] [-TE <TE.tab>] [-TEage] [-nonTE <X>] [-fa <genome.fa>] [-subtract <what-to-subtract>] [-subid <name>] [-noselfsub] [-bedtools <path/to/bins>] [-addcol <col1,col2,etc>] [-filter <col,filter>] [-parse <col_nb,filter>] [-cut <X,X,X>] [-v] [-clean] [-chlog] [-h] [-help]
    
-   SYNOPSIS
+	SYNOPSIS
     Type -help for detailed explanations + on how to read the outputs.
     Pipeline to analyse TE composition in features (exons of transcripts, coding or non coding, transcription factor binding sites, ChIP-seq data, etc)
     
-   REQUIREMENTS
+	REQUIREMENTS
     BEDtools is required for this pipeline to run (Quinlan AR and Hall IM, 2010. Bioinformatics)
     Available at: https://github.com/arq5x/bedtools2
     
-   CITATION - please cite in the Methods:
+  	 CITATION - please cite in the Methods:
       - For this pipeline using -f gtf, cite Kapusta et al. (2013) PLoS Genetics
       - For this pipeline using -f bed, cite Lynch et al. (2015) Cell Reports
       - For the use of BEDtools, Quinlan AR and Hall IM (2010) Bioinformatics
       
-   DEBUGGING
+	DEBUGGING
      First thing to do = check that your input files are not encoded as Classic Mac (CR).
      Also, double check the usage and the doc, just in case.
      Then, if you really think your input files are OK, shoot me an email with the errors, your command line and sample files reproducing the error if possible.
    
-   DETAILS OF OPTIONS (MD = mandatory and OPT = optional):
+	DETAILS OF OPTIONS (MD = mandatory and OPT = optional):
     -i         => MD  - (STRING) input file
     -dir       => OPT - (BOOL) add this if -i corresponds to a folder containing files to work with (need to contain ONLY these files!!)
     -f         => MD  - (STRING) This means more type of analysis than format of the input file.
