@@ -83,3 +83,11 @@ Last update  :  Nov 2015
      -h,-help =>   (BOOL)   print this usage
      -chlog   =>   (BOOL)   print changelog
 
+
+
+
+TE-analysis_Shuffle
+=====
+version 1.0
+
+USAGE: in progress
