@@ -1,8 +1,6 @@
 TE-analysis_Coverage
 =====
 version 3.0
-
-USAGE:
 Last update  :  Nov 2015
 
 	perl TE-analysis_Coverage.pl -in <file.tab> -type <X>
@@ -88,6 +86,57 @@ Last update  :  Nov 2015
 
 TE-analysis_Shuffle
 =====
-version 1.0
+version 2.0
+Last update  :  Jan 13 2016
 
-USAGE: in progress
+	$scriptname -p prot.gff -l linc.gff -s features_to_shuffle [-n <X>] -r genome.build [-b] -g genome.gaps [-d] [-c <X>] [-t] [-v] [-h]
+
+		/!\\ REQUIRES Set::IntervalTree version 0.02 and won't work with v0.10
+					  GAL::Annotation version later than Jan 2016 [update of is_coding]
+		/!\\ Previous outputs will be moved as *.previous
+
+	CITATION:
+		- Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
+		
+	Description:
+		Features provided in -s will be overlapped with -p and -l files, without (no_boot) or with (boot) shuffling
+		Use -m to do several repetitions of no_boot (one random transcript selected for each round)
+		Each bootstrap (-n) a new random transcript will be selected AND features in -s are reshuffled   
+		Note that one exon may have several types of overlaps (e.g. \"SPL\" and \"exonized\"), 
+		but if several TEs are exonized then the exon is counted only one time for the Exonized category.
+		Output files can be processed in R (use -print to get an example of command lines with the STDERR)
+		and columns are as follow:
+		transcript_type\tboot_and/or_round_value\toverlap_category\tnb_overlaps\tnb_uniq_exons_in_this_category\ttotal_nb_exons_loaded\tunhit_exons_in_this_category
+  
+  	MANDATORY ARGUMENT:	
+    -p,--prot     => (STRING) protein coding gff3 file
+    -l,--linc     => (STRING) lncRNAs gff3 file
+    -s,--shuffle  => (STRING) Features to shuffle = TE file, in gff3 format
+                              The Repeat Masker Utils contains a script to do so, written by R. Hubley
+    -r,--range    => (STRING) To know the maximum value in a given chromosome/scaffold. 
+                              File should be: Name \\t length
+                              From UCSC, files *.chrom.sizes
+                              If you don't have such file, use -b (--build) and provide the genome fasta file for -r
+    -g,--gap      => (STRING) \"gap file\" bin, chrom, chromStart, chromEnd, ix, n, size, type, bridge
+                              Corresponds to the UCSC assembly gap file, or you can get it with this script:
+                              https://github.com/4ureliek/DelGet/blob/master/Utilities/fasta_get_gaps.pl
+                              If you don't have such file, use -d (--dogaps) and provide the genome fasta file for -g
+                              (the one from UCSC may contain gaps of lenght = 1 and it will create issues)
+	
+ 	 OPTIONAL ARGUMENTS:
+    -i,--inter    => (INT)    Minimal length (in nt) of intersection in order to consider the TE included in the feature.
+                              Default = 10 (to match the TEanalysis-pipeline)
+    -n,--nboot    => (STRING) number of bootsraps
+                              Default = 100
+                              If set to 1, no bootstrap will be done
+    -m,--more     => (INT)    Even in the no_boot, a random transcript is picked. Set this number to do repetitions for no_boot.
+                              Default = 0 (this would mean X times more bootstraps)
+    -b,--build    => (BOOL)   See above; use this and provide the genome fasta file if no range/lengths file (-r)
+                              This step may take a while but will create the required file						
+    -d,--dogaps   => (BOOL)   See above; use this and provide the genome fasta file if no gap file (-g)
+                              This step is not optimized, it will take a while (but will create the required file)
+    -c,--cat      => (STRING) Concatenate the outputs from -p and -l, boot and no boot. Must provide core filename
+                              Typically, -c linc.prots.cat
+    -t,--text     => (BOOL)   [NOT THERE YET] To get examples of command lines to use in R to process the outputs
+    -v,--version  => (BOOL)   print the version
+    -h,--help     => (BOOL)   print this usage
