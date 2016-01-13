@@ -82,7 +82,7 @@ Synopsis (v$version):
                               This step is not optimized, it will take a while (but will create the required file)
     -c,--cat      => (STRING) Concatenate the outputs from -p and -l, boot and no boot. Must provide core filename
                               Typically, -c linc.prots.cat
-    -t,--text     => (BOOL)   [NOT THERE YET] To get examples of command lines to use in R to process the outputs
+    -t,--text     => (BOOL)   To get examples of command lines to use in R to process the outputs
     -v,--version  => (BOOL)   print the version
     -h,--help     => (BOOL)   print this usage
 \n";
