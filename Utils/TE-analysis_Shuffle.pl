@@ -501,9 +501,10 @@ sub shuffle_features_no_overlap {
 			$range_info   = $okay_ranges->{$seqid}[$random_range];
 			my ($range_min, $range_max) = split /-/, $range_info;
 			next FEATURE if (! $range_max); #Seems like sometimes this was undef... But I could not track this error, $okay_ranges when dumped shows min and max for all
-			$range_max = $range_max - ($end - $start);
-			my $new_start = int($range_min + rand($range_max - $range_min));
-			my $new_end   = $new_start + ($end - $start); 
+			my $length = $end - $start;
+			$range_max = $range_max - $length;			
+			$new_start = int($range_min + rand($range_max - $range_min));
+			$new_end   = $new_start + $length;
 			#Now save
 			$new_feature_overlap_check{$seqid}{$range_info} = Set::IntervalTree->new if (! defined $new_feature_overlap_check{$seqid}{$random_range});
 			my @overlap = @{$new_feature_overlap_check{$seqid}{$range_info}->fetch($new_start, $new_end)};
@@ -511,6 +512,7 @@ sub shuffle_features_no_overlap {
 		}
 		$new_feature_overlap_check{$seqid}{$range_info}->insert(\$feature_id, $new_start, $new_end);
 		$new_feature_pos{$feature_id} = [$new_start, $new_end, $range_info, $seqid];
+		
 	}
     return \%new_feature_pos;
 }
