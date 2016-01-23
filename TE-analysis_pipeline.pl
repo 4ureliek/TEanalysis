@@ -58,7 +58,8 @@ my $changelog = "
 
 
 # TO DO: 
-#  - Get enrichment with randomizations, to take in account set size [check with Ed]
+#  - Do a utils script to integrate data from several runs as summary or TEratios, like the Coverage one, but with mosaic plots
+
 #  - When -parse, previous files have to be deleted or it won't actually filter, it's annoying. Solve that.
 #  - Fix intron TrInfos - use exon coordinates to check and not introns, to see if SPL overlap. However, it's not really more informative than the exon output. 
 \n";
@@ -82,19 +83,22 @@ my $usage = "\nUsage [$version]:
    DEBUGGING
      First thing to do = check that your input files are not encoded as Classic Mac (CR).
      Also, double check the usage and the doc, just in case.
-     Then, if you really think your input files are OK, shoot me an email with the errors, your command line and sample files reproducing the error if possible.
+     Then, if you really think your input files are OK, shoot me an email or open an issue on GitHub with the errors, 
+     your command line and sample files reproducing the error if possible.
    
    DETAILS OF OPTIONS (MD = mandatory and OPT = optional):
     -i         => MD  - (STRING) input file
     -dir       => OPT - (BOOL) add this if -i corresponds to a folder containing files to work with (need to contain ONLY these files!!)
-    -f         => MD  - (STRING) This means more type of analysis than format of the input file.
-                         chose between -f gtf or -f bed (check -help for more information)
+    -f         => MD  - (STRING) This sets the type of analysis (kind of related to the format of the input file)
+                         chose between -f gtf (complex) or -f bed (simple)
+                         Check -help for more information.
                          gtf (default) = complex analysis (for transcripts - TSS, exons, splicing sites, etc)
+                               gtf and gff files will work, but only if all the info is in it (see -help)
                          bed = simple analysis (for TF binding sites, ChIP-seq data etc)
                                5 columns bedfile is required: chr start end unique_ID score/. strand                        
     -myf       => OPT - (STRING) if input file is not formated as a gtf/gff3 or bed: use this option with a text file to set the column numbers.
-                         You still need to provide -f to determine the type of analysis.
                          To generate an example of the text file to provide, type this option alone (with the path/name of the file to create)
+                         When you run the pipeline, you still need to provide -f to determine the type of analysis.
     -RMout     => MD  - (STRING) repeat masker output file .out
                          Even if you already have the .out.bed file, put .out in command line
                          Obviously requires to be for the same assembly file/version than the input file (ex. mm9 or mm10, hg19 or hg38, etc)
@@ -162,8 +166,16 @@ my $usage = "\nUsage [$version]:
 
 my $longhelp = "\nSome documentation for TE-analysis_pipeline.pl [$version]
     Author       :  Aurelie Kapusta 
-	Last update  :  11 Feb 2015; NOT FINISHED
+	Last update  :  17 Jul 2015
 
+	--------------------------------
+	   INPUT FILES
+	--------------------------------
+	
+
+	--------------------------------
+	   FILES CREATED
+	--------------------------------
 	- creates \"Exon Structure\" file, with a line per exon with some info added like exon type (FIRST, LAST, etc), transcript coordinates and mature transcript length
 	- extract features:
 		exons (split non coding and coding -> split in CDS and UTRs)
@@ -688,7 +700,7 @@ sub RMtobed {
 			$start=$start+1 if ($base == 0);
 			
 			#now print 
-			$chr =~ s/gi\|.+\|gb/gb/ if ($gb == 1); #For Rachel
+# 			$chr =~ s/gi\|.+\|gb/gb/ if ($gb == 1); #For Rachel
 			print $bed_fh "$chr\t$start\t$end\t$ID\t.\t$strand\n"; #with ID being the whole line => easy to acces to RMoutput
 		}
 		close ($fh);
@@ -2424,6 +2436,7 @@ sub summary {
 # 	$countTE->{'tr'}{$tr_type}{$Tr_ID_full}=1;
 	
 	print $fh "#Counts of TSS and polyA in TEs, and transcripts with at least one TE fragment (of minimum 10nt) in the features (e.g. exons, intergenic regions)\n\n";
+	print $fh "#\t(nr) means that unique TSS, splicing sites or polyA are considered (if 10 transcripts share a TSS the count will be 1).\n";
 	print $fh "#\ttype\tin_TE(nr)\tTotal_In_Set(nr)\t%(nr)\n";
 	foreach my $id (sort keys %{$countTE}) { #category
 		foreach my $type (sort keys %{$countTE->{$id}}) { #type of transcripts
