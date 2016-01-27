@@ -86,7 +86,7 @@ Last update  :  Nov 2015
 
 TE-analysis_Shuffle
 =====
-version 2.0
+version 3.0
 Last update  :  Jan 26 2016
 
 	perl TE-analysis_Shuffle.pl -p prot.gff -l lncRNA.gff [-o <X>] [-m <X>] -s features_to_shuffle [-n <X>] -e genome.gaps [-d] -r genome.range [-b] [-i include] [-c <X>] [-t] [-w <bedtools_path>] [-v] [-h]
