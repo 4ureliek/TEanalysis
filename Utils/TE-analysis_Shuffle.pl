@@ -27,7 +27,7 @@ my $changelog = "
 #	- v1.0 = 2012
 #	- v2.0 = Jan 11 2016
 #		Too many changes to list here, but concept remains the same
-#	- v3.0 = Jan 21 2016
+#	- v3.0 = Jan 26 2016
 #       Change to bedtools instead of using the Set::IntervalTree perl module. 
 #       This means there will be many files printed, but will be much faster
 #       However this also means that there will not be a verification that transcripts
@@ -41,7 +41,7 @@ my $changelog = "
 my $usage = "
 Synopsis (v$version):
 
-    $scriptname -p prot.gff -l lncRNA.gff [-o <X>] [-m <X>] -s features_to_shuffle [-n <X>] -e genome.gaps [-d] -r genome.range [-b] [-i include] [-c <X>] [-t] [-w <bedtools_path>] [-v] [-h]
+    perl $scriptname -p prot.gff -l lncRNA.gff [-o <X>] [-m <X>] -s features_to_shuffle [-n <X>] -e genome.gaps [-d] -r genome.range [-b] [-i include] [-c <X>] [-t] [-w <bedtools_path>] [-v] [-h]
 
     /!\\ REQUIRES - Bedtools
 	              - GAL::Annotation version later than Jan 2016 [update of is_coding]
