@@ -21,7 +21,7 @@ use GAL::Annotation; #if issues, there is an alternative subroutine not using it
 #flush buffer
 $| = 1;
 
-my $version = "3.0";
+my $version = "3.2";
 my $scriptname = "TE-analysis_Shuffle.pl";
 my $changelog = "
 #	- v1.0 = 2012
@@ -33,6 +33,11 @@ my $changelog = "
 #       However this also means that there will not be a verification that transcripts
 #          are located in an acceptable range (not in the -excl file). 
 #          Assumes they are OK. Should be though.
+#	- v3.1 = Jan 29 2016
+#       Delete intermediate files, for space
+#	- v3.2 = Feb 03 2016
+#       Bug fix in rank (and therefore p value), was inverted (1000 instead of 1)
+#       Delete the temp folders
 \n";
 
 # TO DO:
@@ -230,8 +235,10 @@ if ($nboot > 0) {
 		($boots,$boots_tot_exons) = check_for_featured_overlap("$temp_p/boot.$i.joined",$p_tr,"boot.".$i,'mRNA',$outpb,$inters,$boots,$boots_tot_exons,$whichgene);
 		`cat $outlb >> $catout.boot.txt` if (($catout) && (-e $outlb));
 		`cat $outpb >> $catout.boot.txt` if (($catout) && (-e $outpb));
+		`rm -Rf $temp_l/boot.$i.joined $temp_p/boot.$i.joined $shuffled`; #these files are now not needed anymore, all is stored
 	}
 }
+`rm -Rf $temp_l $temp_p $temp_s`; #these folders are not needed anymore
 
 #Stats now
 print STDERR " --- Get and print stats\n" if ($nboot > 0);
@@ -708,24 +715,26 @@ sub print_stats {
 	
 	foreach my $cat (keys %{$obs}) {
 		foreach my $type (keys %{$obs->{$cat}}) {
-			print $fh "$type\t$cat\t$obs->{$cat}{$type}{'avg'}\t$obs->{$cat}{$type}{'sd'}\t$no_boot_exons->{$type}{'avg'}\t$no_boot_exons->{$type}{'sd'}\t$exp->{$cat}{$type}{'avg'}\t$exp->{$cat}{$type}{'sd'}\t$exp->{$cat}{$type}{'rank'}\t$exp->{$cat}{$type}{'pval'}\n";		
+			my $pval = $exp->{$cat}{$type}{'pval'};
+			$pval = "na" if (($exp->{$cat}{$type}{'avg'} == 0) && ($obs->{$cat}{$type}{'avg'} == 0)); #should not happen with enough bootstraps
+			print $fh "$type\t$cat\t$obs->{$cat}{$type}{'avg'}\t$obs->{$cat}{$type}{'sd'}\t$no_boot_exons->{$type}{'avg'}\t$no_boot_exons->{$type}{'sd'}\t$exp->{$cat}{$type}{'avg'}\t$exp->{$cat}{$type}{'sd'}\t$exp->{$cat}{$type}{'rank'}\t$pval\n";		
 		}
 	}
 	close $fh;
     return 1;
 }
 sub get_exon_data {
-	my $all_data = shift;
-	my %processed_data = ();
-	foreach my $type (keys %{$all_data}) {
+	my $tot_ex = shift;
+	my %exons = ();
+	foreach my $type (keys %{$tot_ex}) {
 		my @data = ();
-		foreach my $round (keys %{$all_data->{$type}}) {
-			push(@data,$all_data->{$type}{$round}{'tot'});	
+		foreach my $round (keys %{$tot_ex->{$type}}) {
+			push(@data,$tot_ex->{$type}{$round}{'tot'});	
 		}
 		#get average and standard deviation from @data
-		($processed_data{$type}{'avg'},$processed_data{$type}{'sd'}) = get_avg_and_sd(\@data);
+		($exons{$type}{'avg'},$exons{$type}{'sd'}) = get_avg_and_sd(\@data);
 	}
-	return(\%processed_data);
+	return(\%exons);
 }
 sub get_cat_data {
 	my ($all_data,$n,$obs) = @_;
@@ -740,11 +749,11 @@ sub get_cat_data {
 			($cat_data{$cat}{$type}{'avg'},$cat_data{$cat}{$type}{'sd'}) = get_avg_and_sd(\@data);
 			#Now get he rank of the observed value in the list of expected => get a p value
 			unless ($n == 0) {
-				my $rank = 0;
-				@data = sort {$b <=> $a} @data; #sort descending, makes it faster when significant... Often is
+				my $rank = 1; #base 1, not 0...
+				@data = sort {$a <=> $b} @data;
 				EXP: foreach my $exp (@data) {
-					last EXP if ($exp < $obs->{$cat}{$type}{'avg'});
-					$rank++; #++ if > then
+					$rank++ if ($exp < $obs->{$cat}{$type}{'avg'});
+					last EXP if ($exp > $obs->{$cat}{$type}{'avg'});
 				}
 				$cat_data{$cat}{$type}{'rank'}=$rank;
 				$cat_data{$cat}{$type}{'pval'}=$rank/$nboot;
