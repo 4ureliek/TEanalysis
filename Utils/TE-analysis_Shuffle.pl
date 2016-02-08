@@ -21,7 +21,7 @@ use GAL::Annotation; #if issues, there is an alternative subroutine not using it
 #flush buffer
 $| = 1;
 
-my $version = "3.2";
+my $version = "3.3";
 my $scriptname = "TE-analysis_Shuffle.pl";
 my $changelog = "
 #	- v1.0 = 2012
@@ -38,6 +38,10 @@ my $changelog = "
 #	- v3.2 = Feb 03 2016
 #       Bug fix in rank (and therefore p value), was inverted (1000 instead of 1)
 #       Delete the temp folders
+#	- v3.3 = Feb 08 2016
+#       Count transcript hits as well, as a category
+#       Two-tailed test
+#       Bug fix for -m 1 (would return only 0s for observed values)
 \n";
 
 # TO DO:
@@ -68,13 +72,14 @@ Synopsis (v$version):
     Note that one exon may have several types of overlaps (e.g. \"SPL\" and \"exonized\"),
        but each exon is counted only one time for each category.
        Note that because TEs are often fragmented + there are inversions, the counts for the exonized TEs is likely inflated;
-       this could be corrected a tad, but is not for now. Not the major category that is looked at anyway.
-       However, this also means that when TEs are shuffled, there are more fragments than TEs; some should be moved non independently, 
-       or the input file should be corrected when possible to limit that issue
-    Output files columns are as follow:
-       transcript_type\tboot_and/or_round_value\toverlap_category\tnb_uniq_exons_in_this_category\ttotal_nb_exons_loaded\tunhit_exons_in_this_category
-    Output files can be processed in R (use -print to get an example of command lines with the STDERR)
-    This script will also provide pvalues of observed versus expected (permutation test); best pvalues would require 1000 bootstraps
+       this also means that when TEs are shuffled, there are more fragments than TEs. Some should be moved non independently, 
+       or the input file should be corrected when possible to limit that issue [not implemented in this script for now]   
+    Output files columns of the .boot and .no_boot outputs are as follow:
+          transcript_type\tround\toverlap_category\tuniq_exons_in_this_category\ttotal_exons_loaded\texons_unhit_in_this_category\ttotal_exons_hit_all_categories
+       these can also be processed in R (use -t to get an example of command lines); but since v3 stats are done in the script (See below)
+    Two-tailed permutation test is done on the values (rank of the observed hits into the list of expected ones)
+       and the results are in a .stats.txt file (and details in a .stats.details.txt file).
+       -n 1000 is best but takes time, it is advised to look at -n 10 first (it affects the pvalues but not much the numbers)
   
   MANDATORY ARGUMENTS:	
     -p,--prot     => (STRING) protein coding gff3 file
@@ -101,7 +106,7 @@ Synopsis (v$version):
     -m,--more     => (INT)    Even in the no_boot, a random transcript is picked. Set this number to do repetitions for no_boot.
                               Default = 1 (still need it done 1 time; set this to 0 is equivalent to 1)
     -n,--nboot    => (STRING) number of bootsraps with shuffled -s file
-                              Default = 100
+                              Default = 10, advised = 1000
                               If set to 0, no bootstrap will be done
     -d,--dogaps   => (BOOL)   See above; use this and provide the genome fasta file if no gap file (-g)
                               This step is not optimized, it will take a while (but will create the required file)
@@ -124,7 +129,7 @@ Synopsis (v$version):
 my ($prot,$linc,$shuffle,$gaps,$dogaps,$build,$dobuild,$catout,$rprint,$v,$help);
 my $inters = 10;
 my $more = 0;
-my $nboot = 100;
+my $nboot = 10;
 my $incl = "na";
 my $bedtools = "";
 my $opt_success = GetOptions(
@@ -191,7 +196,7 @@ print STDERR "  -> $prot\n";
 # ($p_tr,$whichgene) = load_gene_tr($prot,$okseq,$whichgene); #uncomment if GAL::Annotation is a problem
 
 #Outputs
-my $stats = $linc.".".$nboot."boot.stats.txt";
+my $stats = $linc.".".$nboot."boot.stats";
 my ($outl,$outp,$outlb,$outpb,$temp_l,$temp_p,$temp_s) = ("$linc.no_boot","$prot.no_boot","$linc.boot","$prot.boot","$linc.temp","$prot.temp","$toshuff_file.temp");
 cleanup_out($outl,$outp,$outlb,$outpb,$catout,$stats,$temp_l,$temp_p,$temp_s,$nboot);
 
@@ -209,7 +214,7 @@ print STDERR "     (if -m set, there will be several rounds of random transcript
 my $no_boot = ();
 my $no_boot_tot_exons = ();
 for(my $j = 1; $j <= $more; $j++) {
-	print STDERR "     - round $j\n" unless ($more == 1);	
+	print STDERR "     - round $j\n";	
 	($no_boot,$no_boot_tot_exons) = check_for_featured_overlap("$temp_l/no_boot.joined",$l_tr,"no_boot.".$j,'transcript',$outl,$inters,$no_boot,$no_boot_tot_exons,$whichgene);
 	($no_boot,$no_boot_tot_exons) = check_for_featured_overlap("$temp_p/no_boot.joined",$p_tr,"no_boot.".$j,'mRNA',$outp,$inters,$no_boot,$no_boot_tot_exons,$whichgene);
 	`cat $outl >> $catout.no-boot.txt` if (($catout) && (-e $outl));
@@ -242,6 +247,7 @@ if ($nboot > 0) {
 
 #Stats now
 print STDERR " --- Get and print stats\n" if ($nboot > 0);
+
 print_stats($stats,$no_boot,$more,$no_boot_tot_exons,$boots,$nboot,$boots_tot_exons,$scriptname,$version) if ($nboot > 0);
 
 #R command lines if relevant
@@ -252,7 +258,7 @@ print_Rcmdlines($cmdlines,$scriptname,$version) if ($rprint);
 
 #end
 print STDERR " --- $scriptname done\n";
-print STDERR "     Stats printed in: $stats\n" if ($nboot > 0);
+print STDERR "     Stats printed in: $stats.txt\n" if ($nboot > 0);
 print STDERR "     R command lines in $cmdlines\n" if ($rprint);
 print STDERR "\n";
 exit;
@@ -504,7 +510,8 @@ sub cleanup_out {
 	`mv $outpb $outpb.previous` if (-e $outpb);
 	`mv $catout.no-boot.txt $catout.no-boot.txt.previous` if (($catout) && (-e "$catout.no-boot.txt"));
 	`mv $catout.boot.txt $catout.boot.txt.previous` if (($catout) && (-e "$catout.boot.txt"));
-	`mv $stats $stats.previous` if (-e $stats);
+	`mv $stats.txt $stats.txt.previous` if (-e $stats.".txt");
+	`mv $stats.details.txt $stats.details.txt.previous` if (-e $stats.".details.txt");
 	`rm -Rf $temp_l` if (-e $temp_l);
 	`rm -Rf $temp_p` if (-e $temp_p);
 	`rm -Rf $temp_s` if (-e $temp_s);
@@ -542,14 +549,15 @@ sub check_for_featured_overlap {
 	my ($file, $infos, $fileid, $type, $out, $inters, $counts, $total_exons, $whichgene) = @_;
 	my %chosen_tr = ();
 	my %checkgenes = ();
-	my %checkexons = ();
-	
+	my %check = ();
+		
 	#initialize exon count for this run
 	$total_exons->{$type}{$fileid}{'tot'}=0;
 	$total_exons->{$type}{$fileid}{'hit'}=0;
 	
 	#initialize counting of categories if needed
 	unless (defined $counts->{'TSS'}{$type}{$fileid}) {
+		$counts->{'transcript'}{$type}{$fileid}=0;
 		$counts->{'TSS_polyA'}{$type}{$fileid}=0;
 		$counts->{'TSS_5SPL'}{$type}{$fileid}=0;
 		$counts->{'TSS'}{$type}{$fileid}=0;
@@ -587,10 +595,12 @@ sub check_for_featured_overlap {
 			next LINE unless ($ilen >= $inters);
 			#since only one transcript per gene, there should be no worry here about unique counts, 1 exon can only be counted one time in a category; 
 			#however unique exon hits count need a check, and there could be TE overlaps fucking things up, so better safe than sorry
-			$counts->{$cat}{$type}{$fileid}++ unless (defined $checkexons{$l[14]}{$cat});
-			$total_exons->{$type}{$fileid}{'hit'}++ unless (defined $checkexons{$l[14]}{'hit'});
-			$checkexons{$l[14]}{$cat}=1;
-			$checkexons{$l[14]}{'hit'}=1;
+			$counts->{$cat}{$type}{$fileid}++ unless (defined $check{$l[14]}{$cat});
+			$check{$l[14]}{$cat}=1;
+			$total_exons->{$type}{$fileid}{'hit'}++ unless (defined $check{$l[14]}{'hit'});
+			$check{$l[14]}{'hit'}=1;
+			$counts->{'transcript'}{$type}{$fileid}++ unless (defined $check{$chosen}{'hit'}); #counting each tr hit only one time
+			$check{$chosen}{'hit'}=1;
 		}
 	}
 	close ($fh);
@@ -660,14 +670,14 @@ sub overlap_category {
 		} else {  #overhang TE start side only
 			$ilen = $Gend-$st+1;
 			($strand eq "+")?($cat = "3SPL"):($cat = "5SPL");
-			$cat = "polyA" if (($strand eq "-") && (($Trex == 1) || ($ExType eq "LAST")));
 			$cat = "TSS" if (($strand eq "+") && (($Trex == 1) || ($ExType eq "FIRST")));
+			$cat = "polyA" if (($strand eq "-") && (($Trex == 1) || ($ExType eq "LAST")));			
 		}
 	} elsif ($Gend > $en) { # => overhang only end side
 		$ilen = $en-$Gstart+1;
 		($strand eq "+")?($cat = "5SPL"):($cat = "3SPL");
-		$cat = "TSS" if (($strand eq "-") && (($Trex == 1) || ($ExType eq "FIRST")));
 		$cat = "polyA" if (($strand eq "+") && (($Trex == 1) || ($ExType eq "LAST")));
+		$cat = "TSS" if (($strand eq "-") && (($Trex == 1) || ($ExType eq "FIRST")));		
 	}
 	return ($cat,$ilen);
 }
@@ -682,8 +692,9 @@ sub print_out {
 	foreach my $cat (keys %{$counts}) {
 		my $tot = $total_exons->{$type}{$fileid}{'tot'};
 		my $hit = $total_exons->{$type}{$fileid}{'hit'};
-		my $unhit = $tot-$hit;
-		print $fh "$type\t$fileid\t$cat\t$counts->{$cat}{$type}{$fileid}\t$hit\t$tot\t$unhit\n"; #this will be a bit disorganized, whatever
+		my $unhit = $tot-$counts->{$cat}{$type}{$fileid}; #unhit exons in this category
+				#type, id, cat, exons hit in this cat, total exons loaded, unhit exons in this cat, total exons hit all categories
+		print $fh "$type\t$fileid\t$cat\t$counts->{$cat}{$type}{$fileid}\t$tot\t$unhit\t$hit\n";
 	}
 	close $fh;
     return 1;
@@ -698,33 +709,45 @@ sub print_stats {
 	
 	#get the boot and no_boot total_exons values, avg and sd
 	my $no_boot_exons = get_exon_data($no_boot_tot_ex);
-	my $boot_exons = get_exon_data($boot_tot_ex);
+	my $boot_exons = get_exon_data($boot_tot_ex);	
 
 	#get the no_boot values, avg and sd
-	my $obs = get_cat_data($no_boot,0,"na");
-	my $exp = get_cat_data($boots,$nboot,$obs);
-	
+	my $obs = get_cat_data($no_boot,0,"na",$out);
+	my $exp = get_cat_data($boots,$nboot,$obs,$out);
+		
 	#now print
-	open (my $fh, ">", $out) or confess "ERROR (sub print_stats): can't open to write $out $!\n";	
+	my $midval = $nboot/2;
+	open (my $fh, ">", $out.".txt") or confess "ERROR (sub print_stats): can't open to write $out.txt $!\n";	
 	print $fh "#Script $scriptname, v$version\n";
 	print $fh "#Aggregated results + stats\n";
 	print $fh "#With $more repetitions for obs (observed) and $nboot bootstraps for exp (expected)\n";
-	print $fh "#The p value shows how significant the difference between observed and random is (permutation test)\n";
-	print $fh "#Note that for now, total amount of hit exons is not taken in account\n";
-	print $fh "\n#trancript_type\toverlap_category\tobs_mean_exons\tobs_mean_exons_sd\tobs_tot_exons\tobs_tot_exons_sd\texp_mean_exons\texp_mean_exons_sd\tobs_rank_in_exp\tobs_vs_exp_pvalue\n\n";
+	print $fh "#The p value shows how significant the difference between observed and random is (two tailed permutation test)\n";
+	print $fh "#If rank is < $midval and pvalue is not \"na\", there are significantly fewer observed values than expected \n";
+	print $fh "#If rank is > $midval and pvalue is not \"na\", there are significantly higher observed values than expected \n";
+	print $fh "#The category \"transcript\" corresponds to at least one feature hit per transcript\n";
+	print $fh "#For all categories besides \"transcript\", counts are of exons\n";
+	print $fh "\n#trancript_type\toverlap_category\tobs_mean\tobs_mean_sd\t%_obs\tobs_tot\tobs_tot_sd\texp_mean\texp_mean_sd\tobs_rank_in_exp\t2-tailed_permutation-test_pvalue(obs.vs.exp)\tsignificance\n\n";
 	
 	foreach my $cat (keys %{$obs}) {
 		foreach my $type (keys %{$obs->{$cat}}) {
 			my $pval = $exp->{$cat}{$type}{'pval'};
 			$pval = "na" if (($exp->{$cat}{$type}{'avg'} == 0) && ($obs->{$cat}{$type}{'avg'} == 0)); #should not happen with enough bootstraps
-			print $fh "$type\t$cat\t$obs->{$cat}{$type}{'avg'}\t$obs->{$cat}{$type}{'sd'}\t$no_boot_exons->{$type}{'avg'}\t$no_boot_exons->{$type}{'sd'}\t$exp->{$cat}{$type}{'avg'}\t$exp->{$cat}{$type}{'sd'}\t$exp->{$cat}{$type}{'rank'}\t$pval\n";		
+			my $obsper = 0;
+			$obsper = $obs->{$cat}{$type}{'avg'}/$no_boot_exons->{$type}{'avg'}*100 unless ($no_boot_exons->{$type}{'avg'} == 0);
+			my $sign = "ns" if (($pval eq "na") || ($pval > 0.05));
+			$sign = "*" if (($pval ne "na") && ($pval <= 0.05));
+			$sign = "**" if (($pval ne "na") && ($pval <= 0.01));
+			$sign = "***" if (($pval ne "na") && ($pval <= 0.001));
+			print $fh "$type\t$cat\t$obs->{$cat}{$type}{'avg'}\t$obs->{$cat}{$type}{'sd'}\t$obsper\t$no_boot_exons->{$type}{'avg'}\t$no_boot_exons->{$type}{'sd'}\t$exp->{$cat}{$type}{'avg'}\t$exp->{$cat}{$type}{'sd'}\t$exp->{$cat}{$type}{'rank'}\t$pval\t$sign\n";		
 		}
 	}
 	close $fh;
     return 1;
 }
+
+#-----------------------------------------------------------------------------
 sub get_exon_data {
-	my $tot_ex = shift;
+	my $tot_ex = shift;	
 	my %exons = ();
 	foreach my $type (keys %{$tot_ex}) {
 		my @data = ();
@@ -736,9 +759,16 @@ sub get_exon_data {
 	}
 	return(\%exons);
 }
+
+#-----------------------------------------------------------------------------
 sub get_cat_data {
-	my ($all_data,$n,$obs) = @_;
+	my ($all_data,$n,$obs,$out) = @_;
 	my %cat_data = ();
+	my $fh;
+	unless ($n == 0) {
+		open ($fh, ">>", $out.".details.txt") or confess "ERROR (sub print_stats): can't open to write $out.details.txt $!\n";	
+		print $fh "\nType\tCategory\texp\tobs\n";
+	}
 	foreach my $cat (keys %{$all_data}) {
 		foreach my $type (keys %{$all_data->{$cat}}) {
 			my @data = ();
@@ -749,23 +779,31 @@ sub get_cat_data {
 			($cat_data{$cat}{$type}{'avg'},$cat_data{$cat}{$type}{'sd'}) = get_avg_and_sd(\@data);
 			#Now get he rank of the observed value in the list of expected => get a p value
 			unless ($n == 0) {
-				my $rank = 1; #base 1, not 0...
+				my $rank = 0;
 				@data = sort {$a <=> $b} @data;
 				EXP: foreach my $exp (@data) {
+					print $fh "$type\t$cat\t$exp\t$obs->{$cat}{$type}{'avg'}\n";
 					$rank++ if ($exp < $obs->{$cat}{$type}{'avg'});
 					last EXP if ($exp > $obs->{$cat}{$type}{'avg'});
 				}
 				$cat_data{$cat}{$type}{'rank'}=$rank;
-				$cat_data{$cat}{$type}{'pval'}=$rank/$nboot;
+				if ($rank <= $nboot/2) {
+					$cat_data{$cat}{$type}{'pval'}=$rank/$nboot*2;
+				} else {
+					$cat_data{$cat}{$type}{'pval'}=($nboot-$rank)/$nboot*2;
+				}
 			}
 		}
 	}
+	close $fh unless ($n == 0);
 	return(\%cat_data);
 }
+
+#-----------------------------------------------------------------------------
 sub get_avg_and_sd{
 	my($data) = @_;
     confess "ERROR (sub print_stats/get_avg_and_sd): empty data array $!\n" if (not @$data);
-    return (0,0) if (@$data == 1);
+    return ($data->[0],"na") if (@$data == 1); #returning 0,0 was an issue if -m =1
         
 	my $total = 0;
 	foreach (@$data) {
@@ -787,6 +825,9 @@ sub get_avg_and_sd{
 #-----------------------------------------------------------------------------
 sub print_Rcmdlines {
     my ($file,$scriptname,$version) = @_;
+
+# V1   V2  V3   V4                     V5                  V6                       V7
+#type, id, cat, exons hit in this cat, total exons loaded, unhit exons in this cat, total exons hit all categories
 	
 	open (my $fh, ">", $file) or confess "ERROR (sub print_Rcmdlines): can't open to write $file $!\n";
 	print $fh "#Example of R command lines to process the output files
@@ -807,10 +848,7 @@ new.dat\$unhit<-aggregate(dat\$V7, by=list(dat\$V1,dat\$V3),mean)\$x
 dat2<-dat[grep(dat\$V3, pattern=\"TSS_PolyA\", invert=TRUE),]
 ggplot(dat2, aes(x=V3, y=V4))+geom_boxplot()+facet_grid(.~V1)
 new.dat";
-
 	close $fh;
     return 1;
 }
-
-
 
