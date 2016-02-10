@@ -38,10 +38,11 @@ my $changelog = "
 #	- v3.2 = Feb 03 2016
 #       Bug fix in rank (and therefore p value), was inverted (1000 instead of 1)
 #       Delete the temp folders
-#	- v3.3 = Feb 08 2016
+#	- v3.3 = Feb 08/10 2016
 #       Count transcript hits as well, as a category
 #       Two-tailed test
 #       Bug fix for -m 1 (would return only 0s for observed values)
+#       Print more stuff in the stats.txt file so that no need of R
 \n";
 
 # TO DO:
@@ -720,13 +721,24 @@ sub print_stats {
 	open (my $fh, ">", $out.".txt") or confess "ERROR (sub print_stats): can't open to write $out.txt $!\n";	
 	print $fh "#Script $scriptname, v$version\n";
 	print $fh "#Aggregated results + stats\n";
-	print $fh "#With $more repetitions for obs (observed) and $nboot bootstraps for exp (expected)\n";
+	print $fh "#With $more repetitions for obs (observed) and $nboot bootstraps for exp (expected); sd = standard deviation\n";
 	print $fh "#The p value shows how significant the difference between observed and random is (two tailed permutation test)\n";
 	print $fh "#If rank is < $midval and pvalue is not \"na\", there are significantly fewer observed values than expected \n";
 	print $fh "#If rank is > $midval and pvalue is not \"na\", there are significantly higher observed values than expected \n";
 	print $fh "#The category \"transcript\" corresponds to at least one feature hit per transcript\n";
 	print $fh "#For all categories besides \"transcript\", counts are of exons\n";
-	print $fh "\n#trancript_type\toverlap_category\tobs_mean\tobs_mean_sd\t%_obs\tobs_tot\tobs_tot_sd\texp_mean\texp_mean_sd\tobs_rank_in_exp\t2-tailed_permutation-test_pvalue(obs.vs.exp)\tsignificance\n\n";
+	print $fh "\n#trancript_type\tcagtegory_id\toverlap_category\tobs_mean\tobs_sd\t%_obs\tobs_tot\tobs_tot_sd\texp_mean\texp_sd\t%_exp\texp_tot\texp_tot_sd\tobs_rank_in_exp\t2-tailed_permutation-test_pvalue(obs.vs.exp)\tsignificance\n\n";
+	
+	$o->{'TSS_polyA'}=0;
+	$o->{'TSS'}=1;
+	$o->{'TSS_5SPL'}=2;	
+	$o->{'5SPL'}=3;
+	$o->{'3SPL'}=4;
+	$o->{'3SPL_exon_5SPL'}=5;
+	$o->{'exonized'}=6;
+	$o->{'3SPL_polyA'}=7;
+	$o->{'polyA'}=8;	
+	$o->{'transcript'}=9;
 	
 	foreach my $cat (keys %{$obs}) {
 		foreach my $type (keys %{$obs->{$cat}}) {
@@ -734,11 +746,13 @@ sub print_stats {
 			$pval = "na" if (($exp->{$cat}{$type}{'avg'} == 0) && ($obs->{$cat}{$type}{'avg'} == 0)); #should not happen with enough bootstraps
 			my $obsper = 0;
 			$obsper = $obs->{$cat}{$type}{'avg'}/$no_boot_exons->{$type}{'avg'}*100 unless ($no_boot_exons->{$type}{'avg'} == 0);
+			my $expper = 0;
+			$expper = $exp->{$cat}{$type}{'avg'}/$boot_exons->{$type}{'avg'}*100 unless ($boot_exons->{$type}{'avg'} == 0);
 			my $sign = "ns" if (($pval eq "na") || ($pval > 0.05));
 			$sign = "*" if (($pval ne "na") && ($pval <= 0.05));
 			$sign = "**" if (($pval ne "na") && ($pval <= 0.01));
 			$sign = "***" if (($pval ne "na") && ($pval <= 0.001));
-			print $fh "$type\t$cat\t$obs->{$cat}{$type}{'avg'}\t$obs->{$cat}{$type}{'sd'}\t$obsper\t$no_boot_exons->{$type}{'avg'}\t$no_boot_exons->{$type}{'sd'}\t$exp->{$cat}{$type}{'avg'}\t$exp->{$cat}{$type}{'sd'}\t$exp->{$cat}{$type}{'rank'}\t$pval\t$sign\n";		
+			print $fh "$type\t$o->{$cat}\t$cat\t$obs->{$cat}{$type}{'avg'}\t$obs->{$cat}{$type}{'sd'}\t$obsper\t$no_boot_exons->{$type}{'avg'}\t$no_boot_exons->{$type}{'sd'}\t$exp->{$cat}{$type}{'avg'}\t$exp->{$cat}{$type}{'sd'}\t$expper\t$boot_exons->{$type}{'avg'}\t$boot_exons->{$type}{'sd'}\t$exp->{$cat}{$type}{'rank'}\t$pval\t$sign\n";		
 		}
 	}
 	close $fh;
