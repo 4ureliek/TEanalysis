@@ -793,12 +793,12 @@ sub get_cat_data {
 			($cat_data{$cat}{$type}{'avg'},$cat_data{$cat}{$type}{'sd'}) = get_avg_and_sd(\@data);
 			#Now get he rank of the observed value in the list of expected => get a p value
 			unless ($n == 0) {
-				my $rank = 0;
+				my $rank = 1; #pvalue can't be 0
 				@data = sort {$a <=> $b} @data;
 				EXP: foreach my $exp (@data) {
-					print $fh "$type\t$cat\t$exp\t$obs->{$cat}{$type}{'avg'}\n";
-					$rank++ if ($exp < $obs->{$cat}{$type}{'avg'});
+					print $fh "$type\t$cat\t$exp\t$obs->{$cat}{$type}{'avg'}\n";					
 					last EXP if ($exp > $obs->{$cat}{$type}{'avg'});
+					$rank++ if ($exp < $obs->{$cat}{$type}{'avg'});
 				}
 				$cat_data{$cat}{$type}{'rank'}=$rank;
 				if ($rank <= $nboot/2) {
