@@ -728,7 +728,7 @@ sub print_stats {
 	print $fh "#The category \"transcript\" corresponds to at least one feature hit per transcript\n";
 	print $fh "#For all categories besides \"transcript\", counts are of exons\n";
 	print $fh "\n#trancript_type\tcagtegory_id\toverlap_category\tobs_mean\tobs_sd\t%_obs\tobs_tot\tobs_tot_sd\texp_mean\texp_sd\t%_exp\texp_tot\texp_tot_sd\tobs_rank_in_exp\t2-tailed_permutation-test_pvalue(obs.vs.exp)\tsignificance\n\n";
-	
+	my $o = ();
 	$o->{'TSS_polyA'}=0;
 	$o->{'TSS'}=1;
 	$o->{'TSS_5SPL'}=2;	
