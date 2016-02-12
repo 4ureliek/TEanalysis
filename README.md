@@ -1,6 +1,6 @@
 TEanalysis pipeline
 =====
-version 4.5
+version 4.6
 
 USAGE:
 Last update  :  Mars 2015

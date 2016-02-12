@@ -25,7 +25,7 @@ use Getopt::Long;
 select((select(STDERR), $|=1)[0]); #make STDERR buffer flush immediately
 select((select(STDOUT), $|=1)[0]); #make STDOUT buffer flush immediately
 
-my $version = "4.5";
+my $version = "4.6";
 my $changelog = "
 #	v1.0 = Mar 2013
 #      [...]
@@ -55,6 +55,9 @@ my $changelog = "
 #          - bug fix
 #              -f bed => did not have the TEov filtering
 #              TEov: if there is a % in the argument then it will filter on % of the feature coverage and not nt amount
+#	v4.6 = 10 Feb 2016
+#          - bug fix
+#             for -addcol with no -myf (when input = gtf file)
 
 
 # TO DO: 
@@ -928,8 +931,8 @@ sub get_gtf_values {
 	my ($line,$set,$filter,$addcol)	= @_;
 	my %set = %{$set};
 	$line =~ s/\s+"/"/g;
-	$line =~ s/";\s+/";/g;
-	my @line = split (/\s+/,$line);		
+	$line =~ s/"; /";/g;
+	my @line = split (/\t/,$line);		
 	
 	#Get easy values
 	my ($chr,$type,$feat,$start,$end,$strand) = ($line["$set{'chr'}"],$line["$set{'type'}"],$line["$set{'feat'}"],$line["$set{'start'}"],$line["$set{'end'}"],$line["$set{'strand'}"]);
@@ -945,7 +948,7 @@ sub get_gtf_values {
 			push (@colstoadd,$line[$col]);
 		}
 	}
-	
+		
 	#correct for the fact that there are only numbers for chromosomes in ensembl gtf (not gencode for ex)
 	$chr = "chr".$chr if (($chr =~ /^\d+$/) || ($chr =~ /^\w$/)); #one letter = X, Y 
 	
@@ -960,7 +963,12 @@ sub get_gtf_values {
 	
 	#now, get gene and transcript ids + gene and tr biotypes - different if real gtf or not. Deal with filtering and columns to add as well.
 	my ($gene_id,$tr_id,$gene_name,$tr_name,$gene_type,$tr_type);
-	my %v = ();
+	my %v = ('gene_id' => "na",
+             'transcript_id' => "na",
+             'gene_name' => "na",
+             'transcript_name' => "na",
+             'gene_type' => "na",
+             'transcript_type' => "na");
 	if ($set{"info"}) { #if that's define, means it is gtf format and not the -myf
 		my $info = $line[$set{"info"}];
 		my @info = split(';',$info);
@@ -1047,13 +1055,15 @@ sub get_tr_infos {
 		if (($parse ne "all,all") && ($addcol ne "na")) {
 			my $skip = 1;
 			my @cols = @{$colstoadd};
+			#start looping end of usual file
+			my @line = split('\t',$line);
+			my $st = $#line - $#cols;
 			for (my $i = 0; $i <= $#cols; $i ++) {
 				my $value = $cols[$i];
-				my $add = $i + 10;
+				my $add = $i + $st;
 				$skip = 0 if (($pcol eq $add) && ($pname eq $value));
 			}
 			next LINE if ($skip == 1); #filter only if correct column
-			print STDERR "$line \n";
 		}
 				
 		#OK, carry on now
