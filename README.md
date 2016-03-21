@@ -1,15 +1,15 @@
 Utils
 =====
 Utils scripts are: 
-	TE-analysis_Coverage.pl
-	   provides a way to visualize which parts of the TEs are in the set (coverage graph on consensus);
-	   it requires the output of the TEanalysis_pipeline.pl         
-	TE-analysis_Shuffle.pl    
-	   will assess if transcript features contributed by TEs (TSS, polyA, etc) are enriched or not, 
-	   compared to a random shuffling of the TEs. Requires the output of the TEanalysis_pipeline.pl        
-	TE-analysis_Shuffle_bed.pl    
-	   will assess which TEs are enriched in a set of features (bed file)
-	   compared to a random shuffling of the TEs. This one DOES NOT require the output of the pipeline
+    TE-analysis_Coverage.pl
+       = a way to visualize which parts of the TEs are in the set (coverage graph on consensus);
+         it requires the output of the TEanalysis_pipeline.pl
+    TE-analysis_Shuffle.pl
+       = assess if transcript features contributed by TEs (TSS, polyA, etc) are enriched or not, 
+        compared to a random shuffling of the TEs. Requires the output of the TEanalysis_pipeline.pl
+    TE-analysis_Shuffle_bed.pl 
+       = assess which TEs are enriched in a set of features (bed file)
+        compared to a random shuffling of the TEs. This one DOES NOT require the output of the pipeline
 
 
 TEanalysis pipeline
