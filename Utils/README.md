@@ -176,7 +176,7 @@ Last update  :  Mar 21 2016
     /!\\ REQUIRES: Bedtools, versionr ecent enough to include the Shuffle
     /!\\ Previous outputs, if any, will be moved as *.previous [which means previous results are only saved once]
 
-  DESCRIPTION:
+	DESCRIPTION:
     Features provided in -s will be overlapped with -i file (which must be simple intervals in bed format), 
        without (no_boot) or with (boot) shuffling (on same chromosome)
        One feature may overlap with several repeats and all are considered.
@@ -191,7 +191,7 @@ Last update  :  Mar 21 2016
     Two-tailed permutation test ans a binomial test are done on the counts of overlaps. 
        The results are in a .stats.txt file. Note that high bootstraps takes a lot of time. 
   
-  MANDATORY ARGUMENTS:	
+	MANDATORY ARGUMENTS:	
     -f,--feat     => (STRING) ChIPseq peaks, chromatin marks, etc, in bed format
                               /!\\ Script assumes no overlap between peaks
     -s,--shuffle  => (STRING) Features to shuffle = TE file
@@ -215,7 +215,8 @@ Last update  :  Mar 21 2016
                                         (this can be changed in the load_gap subroutine)         
                                      -> 3% of the shuffled feature may overlap with these regions 
                                         (this can be changed in the shuffle subroutine).
-  OPTIONAL ARGUMENTS:
+	
+	OPTIONAL ARGUMENTS:
     -o,--overlap  => (INT)    Minimal length (in nt) of intersection in order to consider the TE included in the feature.
                               Default = 10 (to match the TEanalysis-pipeline.pl)
     -n,--nboot    => (STRING) number of bootsraps with shuffled -s file
