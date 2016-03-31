@@ -9,6 +9,8 @@ Utils scripts are:
 	TE-analysis_Shuffle.pl
        will assess if transcript features contributed by TEs (TSS, polyA, etc) are enriched or not, 
         compared to a random shuffling of the TEs. Requires the output of the TEanalysis_pipeline.pl
+        After v4.0, the is an additional layer: if -f is used, will check for all repeats if they are
+        significantly enriched in any given category of overlap such as TSS, slicing site, etc     
 
 	TE-analysis_Shuffle_bed.pl
        will assess which TEs are enriched in a set of features (bed file)

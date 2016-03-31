@@ -88,76 +88,114 @@ Last update  :  Mar 2016
 
 TE-analysis_Shuffle
 =====
-version 3.3
-Last update  :  Feb 08 2016
+version 4.0
+Last update  :  Mar 31 2016
 
-    perl TE-analysis_Shuffle.pl -p prot.gff -l lncRNA.gff [-o <X>] [-m <X>] -s features_to_shuffle [-n <X>] -e genome.gaps [-d] -r genome.range [-b] [-i include] [-c <X>] [-t] [-w <bedtools_path>] [-v] [-h]
+    perl TE-analysis_Shuffle.pl -l lncRNA.gff -p prot.gff [-o <X>] [-m <X>] -s features_to_shuffle [-n <X>] 
+                               [-f] -e exclude.range [-d] -r genome.range [-b] [-i include.range] [-a] 
+                               [-l no_low] [-t <type,name>] [-c] [-w <bedtools_path>] [-v] [-h]
 
-    /!\\ REQUIRES - Bedtools
+    /!\\ REQUIRES - Bedtools, v2.25+
 	              - GAL::Annotation version later than Jan 2016 [update of is_coding]
 	                see https://github.com/The-Sequence-Ontology/GAL
 	                If issues, open the script in a text editor and comment line 15,	                
 	                as well as the lines with read_gff subroutine, and uncomment lines with subroutine load_gene_tr
-	
     /!\\ Previous outputs, if any, will be moved as *.previous [which only saves results once]
   
-    CITATION:
-    - For the use of this script, Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
+  CITATION:
+    - For the use of this script, you may cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
+      but also include the GitHub link to this script
     - for BEDtools, Quinlan AR and Hall IM (2010) Bioinformatics (DOI: 10.1093/bioinformatics/btq033)
 
-	DESCRIPTION:
-    Features provided in -s will be overlapped with -p and -l files, 
+  DESCRIPTION:
+    - Features provided in -s will be overlapped with -p and/or -l files,
        without (no_boot) or with (boot) shuffling (on same chromosome)
-    A random transcript per gene is selected: use -m to do several repetitions of no_boot
-    For each bootstrap (-n) with shuffling features in -s, transcripts are randomly selected as well
-    Note that one exon may have several types of overlaps (e.g. "SPL" and "exonized"),
-       but each exon is counted only one time for each category.
+       One of -p or -l is mandatory. Having both in the same run means that they are 
+       intersected with the same TE files, which may be better for comparisons, 
+       but does not seem necessary with high bootstraps.
+       
+    - A random transcript per gene is selected: use -m to do several repetitions of no_boot
+    
+    - For each bootstrap (-n) with shuffling features in -s, transcripts are randomly selected as well
+       Note that high bootstraps takes a lot of time.
+       Shuffling is done by default with allowing overlaps between shuffled features, bceause it is
+       faster and OK when over representation of specific repeats are considered.  
        Note that because TEs are often fragmented + there are inversions, the counts for the exonized TEs is likely inflated;
        this also means that when TEs are shuffled, there are more fragments than TEs. Some should be moved non independently, 
-       or the input file should be corrected when possible to limit that issue [not implemented in this script for now]   
-    Output files columns of the .boot and .no_boot outputs are as follow:
-          transcript_type\tround\toverlap_category\tuniq_exons_in_this_category\ttotal_exons_loaded\texons_unhit_in_this_category\ttotal_exons_hit_all_categories
-       these can also be processed in R (use -t to get an example of command lines); but since v3 stats are done in the script (See below)
-    Two-tailed permutation test is done on the values (rank of the observed hits into the list of expected ones)
-       and the results are in a .stats.txt file (and details in a .stats.details.txt file).
-       -n 1000 is best but takes time, it is advised to look at -n 10 first (it affects the pvalues but not much the numbers)
+       or the input file should be corrected when possible to limit that issue [not implemented in this script for now]
+                  
+    - Note that one exon may have several types of overlaps (e.g. "SPL" and "exonized"),
+       but each exon is counted only one time for each category (important for "exonized").
+       However for the results per repeat, each hit is counted, unless it's the same TE
+   
+    - If you need to generate the <genome.gaps> file but you would also like to add more files to the -e option, 
+       just do a first run with no bootstraps (in this example the genome.range is also being generated):
+       perl ~/bin/$scriptname -f input.bed -s genome.out -r genome.fa -b -e genome.fa -d -n 0
+
+    - Two-tailed permutation test is done on the counts of overlaps for categories
+      and the results are in a .stats.cat.txt file.
+      If -f is used then stats are also made on each repeat, with two-tailed 
+      permutation and binomial tests and the results are in a .stats.TE.txt file.     
   
-	MANDATORY ARGUMENTS:	
-    -p,--prot     => (STRING) protein coding gff3 file
-    -l,--lnc      => (STRING) lncRNAs gff3 file
+  MANDATORY ARGUMENTS:
+    -p,--prot     => (STRING) protein coding gff3 file; one of -p or -l is mandatory
+    -l,--lnc      => (STRING) lncRNAs gff3 file; one of -p or -l is mandatory
     -s,--shuffle  => (STRING) Features to shuffle = TE file
-                              For now, can only be the repeat masker .out or the .bed file generated by the TE-analysis_pipeline script                            
-                              TO DO = allow any bed or gff file
+                              Repeat masker .out or the .bed file generated by the TE-analysis_pipeline                            
     -r,--range    => (STRING) To know the maximum value in a given chromosome/scaffold. 
                               File should be: Name \\t length
                               Can be files from UCSC, files *.chrom.sizes
-                              If you don't have such file, use -b (--build) and provide the genome fasta file for -r
-                               
-    -e,--excl     => (STRING) This will be used as -excl for bedtools shuffle: "coordinates in which features from -i should not be placed."
-                              Should be either in BED format or be a UCSC gap file (bin, chrom, chromStart, chromEnd, ix, n, size, type, bridge)
-                              (detected based on .bed extension at the end of the file name or not)
-                              You can get it with this script: https://github.com/4ureliek/DelGet/blob/master/Utilities/fasta_get_gaps.pl
-                              If you don't have such file, use -d (--dogaps) and provide the genome fasta file for -e
-                              (note that the one from UCSC may contain gaps of lenght = 1 and it will create issues;
-                              this script will filter out N stretches of length < 10nt)
-	
-	OPTIONAL ARGUMENTS:
+                              If you don't have such file, use -b (--build) and provide the genome fasta file for -r                              
+    -e,--excl     => (STRING) This will be used as -excl for bedtools shuffle: \"coordinates in which features from -i should not be placed.\"
+                              More than one file may be provided (comma separated), they will be concatenated 
+                              (in a file = first-file-name.cat.bed).
+                              By default, at least one file is required = assembly gaps, and it needs to be the first file
+                              if not in bed format. Indeed, you may provide the UCSC gap file, with columns as:
+                                  bin, chrom, chromStart, chromEnd, ix, n, size, type, bridge
+                              it will be converted to a bed file. Additionally, you may provide the genome file in fasta format
+                              and add the option -d (--dogaps), to generate a bed file corresponding to assembly gaps.
+                              Other files may correspond to regions of low mappability, for example for hg19:
+                              http://www.broadinstitute.org/~anshul/projects/encode/rawdata/blacklists/hg19-blacklist-README.pdf
+                              Notes: -> when the bed file is generated by this script, any N stretch > 50nt will be considered as a gap 
+                                        (this can be changed in the load_gap subroutine)         
+                                     -> 3% of the shuffled feature may overlap with these regions 
+                                        (this can be changed in the shuffle subroutine).	
+  OPTIONAL ARGUMENTS:
     -o,--overlap  => (INT)    Minimal length (in nt) of intersection in order to consider the TE included in the feature.
                               Default = 10 (to match the TEanalysis-pipeline.pl)
     -m,--more     => (INT)    Even in the no_boot, a random transcript is picked. Set this number to do repetitions for no_boot.
                               Default = 1 (still need it done 1 time; set this to 0 is equivalent to 1)
     -n,--nboot    => (STRING) number of bootsraps with shuffled -s file
-                              Default = 10, advised = 1000
+                              Default = 100 for faster runs; use higher -n for good pvalues 
+                              (-n 10000 is best for permutation test but this will take a while)
                               If set to 0, no bootstrap will be done
-    -d,--dogaps   => (BOOL)   See above; use this and provide the genome fasta file if no gap file (-g)
-                              This step is not optimized, it will take a while (but will create the required file)
+    -f,--full     => (BOOL)   Use -f to also do stats for each repeat separately (separated output, with binomial test as well)
     -b,--build    => (BOOL)   See above; use this and provide the genome fasta file if no range/lengths file (-r)
                               This step may take a while but will create the required file	
-    -i,--incl     => (STRING) To use as -incl for bedtools shuffle: "coordinates in which features from -i should be placed."
-                              Bed of gff format
-    -c,--cat      => (STRING) Concatenate the outputs from -p and -l, boot and no boot. Must provide core filename
-                              Typically, -c linc.prots.cat
-    -t,--text     => (BOOL)   To get examples of command lines to use in R to process the outputs
+    -d,--dogaps   => (BOOL)   See above; use this and provide the genome fasta file if no gap file (-g)
+                              If several files in -e, then the genome needs to be the first one.
+                              This step is not optimized, it will take a while (but will create the required file)                       
+    -i,--incl     => (STRING) To use as -incl for bedtools shuffle: \"coordinates in which features from -i should be placed.\"
+                              Bed of gff format. Could be intervals close to transcripts for example.
+                              More than one file (same format) may be provided (comma separated), 
+                              they will be concatenated (in a file = first-file-name.cat.bed)
+    -a,--add      => (BOOL)   to add the -noOverlapping option to the bedtools shuffle command line, 
+                              and therefore NOT allow overlaps between the shuffled features.
+                              This may create issues mostly if -i is used (space to shuffle into smaller than features to shuffle)
+    -u,--u        => (STRING) To set the behavior regarding non TE sequences: all, no_low, no_nonTE, none
+                                 -t all = keep all non TE sequences (no filtering)
+                                 -t no_low [default] = keep all besides low_complexity and simple_repeat
+                                 -t no_nonTE = keep all except when class = nonTE
+                                 -t none = everything is filtered out (nonTE, low_complexity, simple_repeat, snRNA, srpRNA, rRNA, tRNA/tRNA, satellite)
+    -t,--te       => (STRING) <type,name>
+                              run the script on only a subset of repeats. Not case sensitive.
+                              The type can be: name, class or family and it will be EXACT MATCH unless -c is chosen as well
+                              ex: -a name,nhAT1_ML => only fragments corresponding to the repeat named exactly nhAT1_ML will be looked at
+                                  -a class,DNA => all repeats with class named exactly DNA (as in ...#DNA/hAT or ...#DNA/Tc1)
+                                  -a family,hAT => all repeats with family named exactly hAT (so NOT ...#DNA/hAT-Charlie for example)
+    -c,--contain  => (BOOL)   to check if the \"name\" determined with -filter is included in the value in Repeat Masker output, instead of exact match
+                              ex: -a name,HERVK -c => all fragments containing HERVK in their name
+                                  -a family,hAT -c => all repeats with family containing hAT (...#DNA/hAT, ...#DNA/hAT-Charlie, etc)
     -w,--where    => (STRING) if BEDtools are not in your path, provide path to BEDtools bin directory
     -v,--version  => (BOOL)   print the version
     -h,--help     => (BOOL)   print this usage
