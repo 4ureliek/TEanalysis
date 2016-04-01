@@ -1,23 +1,19 @@
 Utils
 =====
-Utils scripts: 
+Utils scripts are: 
+
 	TE-analysis_Coverage.pl
-	    provides a way to visualize which parts of the TEs are in the set (coverage graph on consensus);
+       provides a way to visualize which parts of the TEs are in the set (coverage graph on consensus);
         it requires the output of the TEanalysis_pipeline.pl
 
-	TE-analysis_get_big_tables.pl       
-       Util script to merge results of several runs
-       will output a big table with many runs put together (helpful to plot)
-       it requires some of the outputs of the TEanalysis_pipeline.pl
-
 	TE-analysis_Shuffle.pl
-        will assess if transcript features contributed by TEs (TSS, polyA, etc) are enriched or not, 
+       will assess if transcript features contributed by TEs (TSS, polyA, etc) are enriched or not, 
         compared to a random shuffling of the TEs. Requires the output of the TEanalysis_pipeline.pl
         After v4.0, the is an additional layer: if -f is used, will check for all repeats if they are
         significantly enriched in any given category of overlap such as TSS, slicing site, etc     
 
 	TE-analysis_Shuffle_bed.pl
-        will assess which TEs are enriched in a set of features (bed file)
+       will assess which TEs are enriched in a set of features (bed file)
         compared to a random shuffling of the TEs. This one DOES NOT require the output of the pipeline
         
 

@@ -84,38 +84,6 @@ Last update  :  Mar 2016
      -chlog   =>   (BOOL)   print changelog
 
 
-TE-analysis_get_big_tables
-=====
-version 1.0
-Last update  :  Apr 2016
-
-    perl TE-analysis_get_big_tables.pl -d directory [-chlog] [-h] [-help]
-   
-	SYNOPSIS
-     Util for TE-analysis_pipeline.pl (https://github.com/4ureliek/TEanalysis)
-     Use to merge results of several runs: will print tables that will 
-     facilitate plotting / compararisons 
-    
-	REQUIREMENTS
-     - R installed on the computer / server
-     - perl module Statistics::R
-    
-	CITATION
-     - For the use of this script, you may cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
-       but also include the GitHub link to this script
-
-	MANDATORY ARGUMENTS:
-     -d,--dir     => (STRING) directory with a bunch of the outputs from TE-analysis_pipeline.pl
-                              Will be processed:
-                                *_Summary.tab
-                                *.concat.CAT-class.tab
-                                *.concat.CAT.tab
-                                *.concat.AGE.tab (if any)
-
-	OPTIONAL ARGUMENTS:
-     -c,--chlog   => (BOOL)   print log of changes
-     -v,--version => (BOOL)   print the version
-     -h,--help    => (BOOL)   print this usage
 
 
 TE-analysis_Shuffle
@@ -134,42 +102,42 @@ Last update  :  Mar 31 2016
 	                as well as the lines with read_gff subroutine, and uncomment lines with subroutine load_gene_tr
     /!\\ Previous outputs, if any, will be moved as *.previous [which only saves results once]
   
-	CITATION:
+  CITATION:
     - For the use of this script, you may cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
       but also include the GitHub link to this script
     - for BEDtools, Quinlan AR and Hall IM (2010) Bioinformatics (DOI: 10.1093/bioinformatics/btq033)
 
-	DESCRIPTION:
-    Features provided in -s will be overlapped with -p and/or -l files,
-    without (no_boot) or with (boot) shuffling (on same chromosome)
-    One of -p or -l is mandatory. Having both in the same run means that they are 
-    intersected with the same TE files, which may be better for comparisons, 
-    but does not seem necessary with high bootstraps.
+  DESCRIPTION:
+    - Features provided in -s will be overlapped with -p and/or -l files,
+       without (no_boot) or with (boot) shuffling (on same chromosome)
+       One of -p or -l is mandatory. Having both in the same run means that they are 
+       intersected with the same TE files, which may be better for comparisons, 
+       but does not seem necessary with high bootstraps.
        
-    A random transcript per gene is selected: use -m to do several repetitions of no_boot
+    - A random transcript per gene is selected: use -m to do several repetitions of no_boot
     
-    For each bootstrap (-n) with shuffling features in -s, transcripts are randomly selected as well
-    Note that high bootstraps takes a lot of time.
-    Shuffling is done by default with allowing overlaps between shuffled features, bceause it is
-    faster and OK when over representation of specific repeats are considered.  
-    Note that because TEs are often fragmented + there are inversions, the counts for the exonized TEs is likely inflated;
-    this also means that when TEs are shuffled, there are more fragments than TEs. Some should be moved non independently, 
-    or the input file should be corrected when possible to limit that issue [not implemented in this script for now]
-    
-    Note that one exon may have several types of overlaps (e.g. "SPL" and "exonized"),
-    but each exon is counted only one time for each category (important for "exonized").
-    However for the results per repeat, each hit is counted, unless it's the same TE
+    - For each bootstrap (-n) with shuffling features in -s, transcripts are randomly selected as well
+       Note that high bootstraps takes a lot of time.
+       Shuffling is done by default with allowing overlaps between shuffled features, bceause it is
+       faster and OK when over representation of specific repeats are considered.  
+       Note that because TEs are often fragmented + there are inversions, the counts for the exonized TEs is likely inflated;
+       this also means that when TEs are shuffled, there are more fragments than TEs. Some should be moved non independently, 
+       or the input file should be corrected when possible to limit that issue [not implemented in this script for now]
+                  
+    - Note that one exon may have several types of overlaps (e.g. "SPL" and "exonized"),
+       but each exon is counted only one time for each category (important for "exonized").
+       However for the results per repeat, each hit is counted, unless it's the same TE
    
-    If you need to generate the <genome.gaps> file but you would also like to add more files to the -e option, 
-    just do a first run with no bootstraps (in this example the genome.range is also being generated):
-    perl ~/bin/$scriptname -f input.bed -s genome.out -r genome.fa -b -e genome.fa -d -n 0
+    - If you need to generate the <genome.gaps> file but you would also like to add more files to the -e option, 
+       just do a first run with no bootstraps (in this example the genome.range is also being generated):
+       perl ~/bin/$scriptname -f input.bed -s genome.out -r genome.fa -b -e genome.fa -d -n 0
 
-    Two-tailed permutation test is done on the counts of overlaps for categories
-    and the results are in a .stats.cat.txt file.
-    If -f is used then stats are also made on each repeat, with two-tailed 
-    permutation and binomial tests and the results are in a .stats.TE.txt file.     
+    - Two-tailed permutation test is done on the counts of overlaps for categories
+      and the results are in a .stats.cat.txt file.
+      If -f is used then stats are also made on each repeat, with two-tailed 
+      permutation and binomial tests and the results are in a .stats.TE.txt file.     
   
-	MANDATORY ARGUMENTS:
+  MANDATORY ARGUMENTS:
     -p,--prot     => (STRING) protein coding gff3 file; one of -p or -l is mandatory
     -l,--lnc      => (STRING) lncRNAs gff3 file; one of -p or -l is mandatory
     -s,--shuffle  => (STRING) Features to shuffle = TE file
@@ -192,8 +160,7 @@ Last update  :  Mar 31 2016
                                         (this can be changed in the load_gap subroutine)         
                                      -> 3% of the shuffled feature may overlap with these regions 
                                         (this can be changed in the shuffle subroutine).	
-                                        
-	OPTIONAL ARGUMENTS:
+  OPTIONAL ARGUMENTS:
     -o,--overlap  => (INT)    Minimal length (in nt) of intersection in order to consider the TE included in the feature.
                               Default = 10 (to match the TEanalysis-pipeline.pl)
     -m,--more     => (INT)    Even in the no_boot, a random transcript is picked. Set this number to do repetitions for no_boot.
@@ -232,7 +199,8 @@ Last update  :  Mar 31 2016
     -w,--where    => (STRING) if BEDtools are not in your path, provide path to BEDtools bin directory
     -v,--version  => (BOOL)   print the version
     -h,--help     => (BOOL)   print this usage
-
+    
+    
     
 TE-analysis_Shuffle_bed
 =====
