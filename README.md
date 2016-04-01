@@ -1,6 +1,7 @@
 Utils
 =====
-Utils scripts: 
+Utils scripts:
+
 	TE-analysis_Coverage.pl
 	    provides a way to visualize which parts of the TEs are in the set (coverage graph on consensus);
         it requires the output of the TEanalysis_pipeline.pl
