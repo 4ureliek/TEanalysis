@@ -135,8 +135,8 @@ Last update  :  Mar 31 2016
     /!\\ Previous outputs, if any, will be moved as *.previous [which only saves results once]
   
 	CITATION:
-    - For the use of this script, you may cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
-      but also include the GitHub link to this script
+    - You may cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
+      but should also include the GitHub link to this script
     - for BEDtools, Quinlan AR and Hall IM (2010) Bioinformatics (DOI: 10.1093/bioinformatics/btq033)
 
 	DESCRIPTION:
@@ -150,10 +150,11 @@ Last update  :  Mar 31 2016
     
     For each bootstrap (-n) with shuffling features in -s, transcripts are randomly selected as well
     Note that high bootstraps takes a lot of time.
-    Shuffling is done by default with allowing overlaps between shuffled features, bceause it is
-    faster and OK when over representation of specific repeats are considered.  
-    Note that because TEs are often fragmented + there are inversions, the counts for the exonized TEs is likely inflated;
-    this also means that when TEs are shuffled, there are more fragments than TEs. Some should be moved non independently, 
+    Shuffling is done by default with allowing overlaps between shuffled features,
+    because it is faster and OK when over representation of specific repeats are considered.  
+    Note that because TEs are often fragmented + there are inversions, the counts 
+    for the exonized TEs is likely inflated; this also means that when TEs are shuffled, 
+    there are more fragments than TEs. Some should be moved non independently, 
     or the input file should be corrected when possible to limit that issue [not implemented in this script for now]
     
     Note that one exon may have several types of overlaps (e.g. "SPL" and "exonized"),
@@ -165,9 +166,13 @@ Last update  :  Mar 31 2016
     perl ~/bin/$scriptname -f input.bed -s genome.out -r genome.fa -b -e genome.fa -d -n 0
 
     Two-tailed permutation test is done on the counts of overlaps for categories
-    and the results are in a .stats.cat.txt file.
+    and the results are in a *.stats.cat.txt file
     If -f is used then stats are also made on each repeat, with two-tailed 
-    permutation and binomial tests and the results are in a .stats.TE.txt file.     
+    permutation and binomial tests and the results are in a *.stats.TE.txt file.
+    Note that the output *.stats.cat.txt is basically included in the output *.stats.TE.txt,
+    with values of tot tot tot in the columns Rclass, Rfam and Rname
+    The use of -f will take longer but requires fewer bootsraps, 
+    because binomial test is more sensitive.     
   
 	MANDATORY ARGUMENTS:
     -p,--prot     => (STRING) protein coding gff3 file; one of -p or -l is mandatory
@@ -203,6 +208,10 @@ Last update  :  Mar 31 2016
                               (-n 10000 is best for permutation test but this will take a while)
                               If set to 0, no bootstrap will be done
     -f,--full     => (BOOL)   Use -f to also do stats for each repeat separately (separated output, with binomial test as well)
+                              Results will be in a file *.stats.TE.txt
+                              Note that the output *.stats.cat.txt is basically included in the output *.stats.TE.txt,
+                              with values of tot tot tot in the columns Rclass, Rfam and Rname
+                              This will take longer but requires fewer bootsraps, because binomial test is more sensitive
     -b,--build    => (BOOL)   See above; use this and provide the genome fasta file if no range/lengths file (-r)
                               This step may take a while but will create the required file	
     -d,--dogaps   => (BOOL)   See above; use this and provide the genome fasta file if no gap file (-g)

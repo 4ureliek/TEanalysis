@@ -6,15 +6,16 @@
 # Purpose :  Writen to generate data (observed vs expected) shown in Figure 5, 
 #            Kapusta et al. 2013 PLoS Genetics
 #            (http://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1003470)
+#            But highly modified to be more useful
 #######################################################
 use strict;
 use warnings;
 use Carp;
 use Getopt::Long;
 use Bio::SeqIO;
-use GAL::Annotation; #if issues, there is an alternative subroutine not using it, see usage
+use GAL::Annotation; #if issues, there is an alternative subroutine not using this module, see usage
 use Math::CDF;
-use Data::Dumper;
+#use Data::Dumper;
 
 #-----------------------------------------------------------------------------
 #------------------------------- DESCRIPTION ---------------------------------
@@ -22,7 +23,7 @@ use Data::Dumper;
 #flush buffer
 $| = 1;
 
-my $version = "4.0";
+my $version = "4.2";
 my $scriptname = "TE-analysis_Shuffle.pl";
 my $changelog = "
 #	- v1.0 = 2012
@@ -44,13 +45,18 @@ my $changelog = "
 #       Two-tailed test
 #       Bug fix for -m 1 (would return only 0s for observed values)
 #       Print more stuff in the stats.txt file so that no need of R
-#	- v4.0 = Mar 28
+#	- v4.0 = Mar 28 2016
 #       Allow skipping one of the inputs [make -p OR -l non mandatory]
 #       Get results by repeats, like TE-analysis_Shuffle_bed_v2+.pl
 #       + basically integrate all the improvements made there:
 #         = Add binomial test as well
 #         = Filter on some repeats
 #         = possibility of several files to -e and -i
+#	- v4.1 = Mar 31 2016
+#       Few bug fix
+#	- v4.2 = Apr 5 2016
+#       Bug fix in stats by repeats (use of -f)
+#       Correct rank for permutation when last rank (pvalue can't be 0)
 \n";
 
 # TO DO:
@@ -69,8 +75,8 @@ Synopsis (v$version):
     /!\\ Previous outputs, if any, will be moved as *.previous [which only saves results once]
   
   CITATION:
-    - For the use of this script, you may cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
-      but also include the GitHub link to this script
+    - You may cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
+      but should also include the GitHub link to this script
     - for BEDtools, Quinlan AR and Hall IM (2010) Bioinformatics (DOI: 10.1093/bioinformatics/btq033)
 
   DESCRIPTION:
@@ -91,7 +97,7 @@ Synopsis (v$version):
        or the input file should be corrected when possible to limit that issue [not implemented in this script for now]
                   
     - Note that one exon may have several types of overlaps (e.g. \"SPL\" and \"exonized\"),
-       but each exon is counted only one time for each category (important for \"exonimized\").
+       but each exon is counted only one time for each category (important for \"exonized\").
        However for the results per repeat, each hit is counted, unless it's the same TE
    
     - If you need to generate the <genome.gaps> file but you would also like to add more files to the -e option, 
@@ -99,9 +105,13 @@ Synopsis (v$version):
        perl ~/bin/$scriptname -f input.bed -s genome.out -r genome.fa -b -e genome.fa -d -n 0
 
     - Two-tailed permutation test is done on the counts of overlaps for categories
-      and the results are in a .stats.cat.txt file.
+      and the results are in a *.stats.cat.txt file
       If -f is used then stats are also made on each repeat, with two-tailed 
-      permutation and binomial tests and the results are in a .stats.TE.txt file.     
+      permutation and binomial tests and the results are in a *.stats.TE.txt file.
+      Note that the output *.stats.cat.txt is basically included in the output *.stats.TE.txt,
+      with values of tot tot tot in the columns Rclass, Rfam and Rname
+      The use of -f will take longer but requires fewer bootsraps, 
+      because binomial test is more sensitive
   
   MANDATORY ARGUMENTS:
     -p,--prot     => (STRING) protein coding gff3 file; one of -p or -l is mandatory
@@ -136,6 +146,10 @@ Synopsis (v$version):
                               (-n 10000 is best for permutation test but this will take a while)
                               If set to 0, no bootstrap will be done
     -f,--full     => (BOOL)   Use -f to also do stats for each repeat separately (separated output, with binomial test as well)
+                              Results will be in a file *.stats.TE.txt
+                              Note that the output *.stats.cat.txt is basically included in the output *.stats.TE.txt,
+                              with values of tot tot tot in the columns Rclass, Rfam and Rname
+                              This will take longer but requires fewer bootsraps, because binomial test is more sensitive
     -b,--build    => (BOOL)   See above; use this and provide the genome fasta file if no range/lengths file (-r)
                               This step may take a while but will create the required file	
     -d,--dogaps   => (BOOL)   See above; use this and provide the genome fasta file if no gap file (-g)
@@ -501,8 +515,8 @@ sub RMtobed {
 	}
 	print STDERR "     -> $file is in bed format, but $ok does not exist; generating it...\n" if ($file =~ /(.*)\.bed$/);
 	#now it means RM.out, or that the proper bed file does not exist => make it a bed file + load the parsing hash	
-	open(my $fh, "<$file") or confess "\n   ERROR (sub RMtobed): could not open to read $file!\n";
-	open(my $bed_fh, ">$ok") or confess "\n   ERROR (sub RMtobed): could not open to write $ok!\n";
+	open(my $fh, "<$file") or confess "\n   ERROR (sub RMtobed): could not open to read $file $!\n";
+	open(my $bed_fh, ">$ok") or confess "\n   ERROR (sub RMtobed): could not open to write $ok $!\n";
 	LINE: while(<$fh>) {
 		chomp(my $l = $_);
 		my @l = ();
@@ -954,7 +968,7 @@ sub print_cat_data {
 sub print_rep_data {
 	my ($no_boot,$no_boot_exons,$more,$boots,$boot_exons,$nboot,$out,$parsedRM,$scriptname,$version) = @_;
 	print STDERR "     Get data for each repeat, family and class (total and per category)\n";
-	my $te_obs = get_te_data($no_boot,0,"na",$out,$parsedRM);
+	my $te_obs = get_te_data($no_boot,0,"na",$out,$parsedRM);	
 	my $te_exp = get_te_data($boots,$nboot,$te_obs,$out,$parsedRM);	
 	my $midval = $nboot/2;
 	open (my $fh, ">", $out.".TE.txt") or confess "ERROR (sub print_stats): can't open to write $out.TEs.txt $!\n";	
@@ -968,18 +982,23 @@ sub print_rep_data {
 	print $fh "#For the two tailed permutation test:\n";
 	print $fh "#if rank is < $midval and pvalue is not \"ns\", there are significantly fewer observed values than expected \n";
 	print $fh "#if rank is > $midval and pvalue is not \"ns\", there are significantly higher observed values than expected \n";
-	print $fh "\n#\t#\tLevel_(tot_means_all)\t#\t#\tCOUNTS\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\n";
-	print $fh "#Type\tCategory\tRclass\tRfam\tRname\tobs_nb_of_hits\t%_obs_nb_(%of_features)\tobs_tot_nb_of_hits\texp_nb_avg_of_hits\texp_nb_sd\t%_exp_nb_(%of_features)\texp_tot_nb_of_hits(avg)\tobs_rank_in_exp\t2-tailed_permutation-test_pvalue(obs.vs.exp)\tsignificance\tnb_binomal_test_proba(obs.vs.exp)\tnb_binomal_test_pvalue(1-proba)\tsignificance\n\n";
+	print $fh "\n#\t#\tLevel_(tot_means_all)\t#\t#\tCOUNTS\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\n";
+	print $fh "#Type\tCategory\tRclass\tRfam\tRname\t";
+	print $fh "obs_nb_of_hits\tobs_nb_sd\t%_obs_nb_(%of_features)\tobs_tot_nb_of_hits\tobs_tot_sd\t";
+	print $fh "exp_nb_of_hits\texp_nb_sd\t%_exp_nb_(%of_features)\texp_tot_nb_of_hits\texp_tot_sd\t";
+	print $fh "obs_rank_in_exp\t2-tailed_permutation-test_pvalue(obs.vs.exp)\tsignificance\tnb_binomal_test_proba(obs.vs.exp)\tnb_binomal_test_pvalue(1-proba)\tsignificance\n\n";
 
 	foreach my $cat (keys %{$te_exp}) {
 		foreach my $type (keys %{$te_exp->{$cat}}) {		
 			foreach my $Rclass (keys %{$te_exp->{$cat}{$type}}) { 		
 				foreach my $Rfam (keys %{$te_exp->{$cat}{$type}{$Rclass}}) {
 					foreach my $Rname (keys %{$te_exp->{$cat}{$type}{$Rclass}{$Rfam}}) {
+# 						print STDERR "obs value = $te_obs->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'avg'}\n";
 						#observed
-						my ($te_obsnb,$te_obsper) = (0,0);			
+						my ($te_obsnb,$te_obssd,$te_obsper) = (0,0,0);			
 						$te_obsnb = $te_obs->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'avg'} if ($te_obs->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'avg'});
-						$te_obsper = $te_obsnb/$no_boot_exons->{$type}{'avg'} unless ($te_obsnb == 0);
+						$te_obssd = $te_obs->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'sd'} if ($te_obs->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'sd'});
+						$te_obsper = $te_obsnb/$no_boot_exons->{$type}{'avg'}*100 unless ($te_obsnb == 0);
 						$te_obs->{$cat}{$type}{'tot'}{'tot'}{'tot'}{'avg'} = 0 unless ($te_obs->{$cat}{$type}{'tot'}{'tot'}{'tot'}{'avg'});						
 						#expected
 						my $te_expper = 0;
@@ -990,14 +1009,14 @@ sub print_rep_data {
 						$pval_nb = "na" if (($te_expavg == 0) && ($te_obsnb == 0));									
 						#Now print stuff
 						print $fh "$type\t$cat\t$Rclass\t$Rfam\t$Rname\t";
-						print $fh "$te_obsnb\t$te_obsper\t$te_obs->{$cat}{$type}{'tot'}{'tot'}{'tot'}{'avg'}\t"; 
-						print $fh "$te_expavg\t$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'sd'}\t$te_expper\t$te_exp->{$cat}{$type}{'tot'}{'tot'}{'tot'}{'avg'}\t";			
+						print $fh "$te_obsnb\t$te_obssd\t$te_obsper\t$no_boot_exons->{$type}{'avg'}\t$no_boot_exons->{$type}{'sd'}\t"; 
+						print $fh "$te_expavg\t$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'sd'}\t$te_expper\t$boot_exons->{$type}{'avg'}\t$boot_exons->{$type}{'sd'}\t";			
 						my $sign = get_sign($pval_nb);				
 						print $fh "$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'rank'}\t$pval_nb\t$sign\t";
 						$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_proba'} = "na" unless ($te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_proba'});
 						$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_pval'} = "na" unless ($te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_pval'});
 						$sign = get_sign($te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_pval'});
-						$sign = "***" if ($te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_proba'} == 1);
+						$sign = "***" if (($te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_proba'} ne "na") && ($te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_proba'} == 1));
 						print $fh "$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_proba'}\t$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_pval'}\t$sign\n";	
 					}
 				}		
@@ -1058,9 +1077,9 @@ sub get_cat_data {
 				}
 				$cat_data{$cat}{$type}{'rank'}=$rank;
 				if ($rank <= $nboot/2) {
-					$cat_data{$cat}{$type}{'pval'}=$rank/$nboot*2;
+					$cat_data{$cat}{$type}{'pval'}=$rank/$nboot*2; #*2 because 2 tailed
 				} else {
-					$cat_data{$cat}{$type}{'pval'}=(abs($nboot-$rank))/$nboot*2;
+					$cat_data{$cat}{$type}{'pval'}=(abs($nboot-$rank+1))/$nboot*2; #+1 because pvalue can't be 0
 				}			
 			}
 		}
@@ -1134,23 +1153,22 @@ sub get_te_data_details {
 	$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'avg'} = 0 unless ($te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'avg'});
 	$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'sd'} = "na" unless ($te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'sd'});
 	
-	unless ($n == 0) {
-		my $observed = $te_obs->{$cat}{'no_boot'}{$key1}{$key2}{$key3}{'tot'};
+	if ($n > 0) {
+		my $observed = $te_obs->{$cat}{$type}{$key1}{$key2}{$key3}{'avg'};		
 #		print STDERR "FYI: no observed value for {$cat}{'no_boot'}{$key1}{$key2}{$key3}{'tot'}\n" unless ($observed);
-		$observed = 0 unless ($observed);
-	
+		$observed = 0 unless ($observed);				
 		#Get the rank of the observed value in the list of expected + pvalue for the permutation test
 		my $rank = 1; #pvalue can't be 0
 		my @data = sort {$a <=> $b} @{$agg_data} if ($agg_data->[1]);
 		EXP: foreach my $exp (@data) {
 			last EXP if ($exp > $observed);
 			$rank++;
-		}	
+		}
 		$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'rank'}=$rank;
 		if ($rank <= $nboot/2) {
-			$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'pval'}=$rank/$nboot*2;
+			$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'pval'}=$rank/$nboot*2; #*2 because 2 tailed
 		} else {
-			$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'pval'}=(abs($nboot-$rank))/$nboot*2;
+			$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'pval'}=(abs($nboot-$rank+1))/$nboot*2; #+1 because pvalue can't be 0
 		}
 		
 		#Binomial test
