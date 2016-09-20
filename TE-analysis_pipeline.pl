@@ -25,7 +25,7 @@ use Getopt::Long;
 select((select(STDERR), $|=1)[0]); #make STDERR buffer flush immediately
 select((select(STDOUT), $|=1)[0]); #make STDOUT buffer flush immediately
 
-my $version = "4.6";
+my $version = "4.7";
 my $changelog = "
 #	v1.0 = Mar 2013
 #      [...]
@@ -58,6 +58,8 @@ my $changelog = "
 #	v4.6 = 10 Feb 2016
 #          - bug fix
 #             for -addcol with no -myf (when input = gtf file)
+#	v4.7 = 20 Sep 2016
+#          - update to read properly recent Gencode gff3
 
 
 # TO DO: 
@@ -974,7 +976,13 @@ sub get_gtf_values {
 		my @info = split(';',$info);
 		for (my $i = 0; $i <= $#info; $i++) {
 			my ($id,$value);
-			($info[$i] =~ /"/)?(($id,$value) = split(/"/,$info[$i])):(($id,$value) = split(/\s+/,$info[$i]));
+			if ($info[$i] =~ /"/) {
+				($id,$value) = split(/"/,$info[$i]);
+			} elsif ($info[$i] =~ /=/) {
+				($id,$value) = split(/=/,$info[$i]);
+			} else {
+				($id,$value) = split(/\s+/,$info[$i]);
+			}
 			$id =~ s/_biotype$/_type/; #not same appelation in gencode and ensembl
 			$v{$id}=$value;
 		}
@@ -999,6 +1007,9 @@ sub get_gtf_values {
 	
 	#GENCODE	
 	#gene_id "ENSG00000223972.5"; transcript_id "ENSG00000223972.5"; gene_type "transcribed_unprocessed_pseudogene"; gene_status "KNOWN"; gene_name "DDX11L1"; transcript_type "transcribed_unprocessed_pseudogene"; transcript_status "KNOWN"; transcript_name "DDX11L1"; level 2; havana_gene "OTTHUMG00000000961.2";
+
+	#GENCODE v21
+	#ID=exon:ENST00000473358.1:1;Parent=ENST00000473358.1;gene_id=ENSG00000243485.4;transcript_id=ENST00000473358.1; gene_type=lincRNA;gene_status=KNOWN;gene_name=MIR1302-2;transcript_type=lincRNA;transcript_status=KNOWN;transcript_name=MIR1302-2-001;exon_number=1;exon_id=ENSE00001947070.1;level=2;transcript_support_level=5;tag=not_best_in_genome_evidence,dotter_confirmed,basic;havana_gene=OTTHUMG00000000959.2;havana_transcript=OTTHUMT00000002840.1
 
 	return ($filtering,$chr,$type,$feat,$start,$end,$strand,$gene_id,$tr_id,$gene_name,$tr_name,$gene_type,$tr_type,\@colstoadd);
 }		
