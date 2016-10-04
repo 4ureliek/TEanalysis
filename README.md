@@ -29,11 +29,11 @@ version 4.6
 USAGE:
 Last update  :  Mars 2015
 
-	perl TE-analysis_pipeline_v4+.pl -i <inputfile> [-dir] -f <format> [-myf <col_details.txt>] -RMout <RepeatMasker.out> [-RMparsed RM.out.parsed] [-base <RM base>] [-TE <TE.tab>] [-TEage] [-nonTE <X>] [-fa <genome.fa>] [-subtract <what-to-subtract>] [-subid <name>] [-noselfsub] [-bedtools <path/to/bins>] [-addcol <col1,col2,etc>] [-filter <col,filter>] [-parse <col_nb,filter>] [-cut <X,X,X>] [-v] [-clean] [-chlog] [-h] [-help]
+	perl TE-analysis_pipeline_v4+.pl -i <inputfile> [-dir] -f <type_of_analysis> [-myf <col_details.txt>] -RMout <RepeatMasker.out> [-RMparsed RM.out.parsed] [-base <RM base>] [-TE <TE.tab>] [-TEage] [-nonTE <X>] [-fa <genome.fa>] [-subtract <what-to-subtract>] [-subid <name>] [-noselfsub] [-bedtools <path/to/bins>] [-addcol <col1,col2,etc>] [-filter <col,filter>] [-parse <col_nb,filter>] [-cut <X,X,X>] [-v] [-clean] [-chlog] [-h] [-help]
    
 	SYNOPSIS
     Type -help for detailed explanations + on how to read the outputs.
-    Pipeline to analyse TE composition in features (exons of transcripts, coding or non coding, transcription factor binding sites, ChIP-seq data, etc)
+    Purpose = analyse the TE composition in features (exons of transcripts, coding or non coding, transcription factor binding sites, ChIP-seq data, etc)
     
 	REQUIREMENTS
     BEDtools is required for this pipeline to run (Quinlan AR and Hall IM, 2010. Bioinformatics)
@@ -50,9 +50,10 @@ Last update  :  Mars 2015
      Then, if you really think your input files are OK, shoot me an email with the errors, your command line and sample files reproducing the error if possible.
    
 	DETAILS OF OPTIONS (MD = mandatory and OPT = optional):
-    -i         => MD  - (STRING) input file
+    -i         => MD  - (STRING) input file, see more details below (-f usage)
+                         in .bed format for -f bed; in gtf, gff, or any tabulated file for -f gtf
     -dir       => OPT - (BOOL) add this if -i corresponds to a folder containing files to work with (need to contain ONLY these files!!)
-    -f         => MD  - (STRING) This means more type of analysis than format of the input file.
+    -f         => MD  - (STRING) This sets the type of analysis (kind of related to the format of the input file)
                          chose between -f gtf or -f bed (check -help for more information)
                          gtf (default) = complex analysis (for transcripts - TSS, exons, splicing sites, etc)
                          bed = simple analysis (for TF binding sites, ChIP-seq data etc)
