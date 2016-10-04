@@ -128,24 +128,45 @@ Last update  :  Mars 2015
 
 DOCUMENTATION
     Author       :  Aurelie Kapusta 
-	Last update  :  11 Feb 2015
+	Last update  :  04 Oct 2016
 
-	- creates \"Exon Structure\" file, with a line per exon with some info added like exon type (FIRST, LAST, etc), transcript coordinates and mature transcript length
-	- extract features:
-		exons (split non coding and coding -> split in CDS and UTRs)
-		introns
-		XXkb up and down (depending what is set - ex. 10, 5 and 1)
-	- for introns and up+dw, <what-to-subtract.gtf or bed> will be subtracted from the sets => outputs are <file>.subtract.<name>.bed
-	- then all resulting files are intersected with TEs (RMout.out)
+	--------------------------------
+	   INPUT FILES
+	--------------------------------
+	With -f bed (typically for TF binding sites, ChIPseq data, etc)
+	  -i input file needs to be in the 5 columns bed format:
+	     chr start end unique_ID score/. strand
+	  If you only have a 3 columns format, just type:
+         sed 's/$/   .       ./' peaks.bed > peaks.mod.bed
+        (white spaces are tabs, in the command line you can get them by pressing ctrl+v and then the tab key)
+    
+    With -f gtf (typically for gene or transcripts annotations, coding or not):
+       -i input file needs to be in gtf, gff, gff3 or any tabulated format containing the required information
+       If a non-standard file is used (e.g. tabulated file from transcript assemblies), type:
+          perl TE-analysis_pipeline_v4+.pl -myf myfile.conf
+          This will create a .conf file that should be edited to set the columns of the various required info (such as gene_ID, transcript_ID, etc)
+          Note that the same column can refer to different features (such as id or name, for genes or transcripts). No need to make 4 columns with the same info in it in the input file!
+    
+    TE info:
+      -RMout should be the repeat masker output of the SAME assembly, in .out format
+         The pipeline will create a bed file from it (quite long step if the file is big), 
+         with nonTE annotations filtered out (or not, depends on your choice of -nonTE)    
+         During that conversion, TE class and family are updated using the files from 1) -TE and 2) -RMparsed if provided.
+         Many pre-masked assemblies can be found at http://www.repeatmasker.org/genomicDatasets/RMGenomicDatasets.html
+         
+      -RMparsed is the repeat masker output file of -RMout but parsed with the parseRM_simple.pl script (with or without the -lib option)
+         This script can be found at: https://github.com/4ureliek/Parsing-RepeatMasker-Outputs
+         (you can run it with or without -lib option will work, column numbers will be corrected based on column headers)
+         Typically, the file is <RMout.out>.parseRM.all-repeats.tab
+         If not provided, over represented TE families won't be determined
+         Some pre-parsed RM outputs can be found in the Data directory of this pipeline
 
-	This script relies on Transcript information, so gene info is not mandatory. However, it is better for analysis - note that GTF from the UCSC table browser use the same ID for gene and transcript
-
-
-	When CDS, in ExSt file, exon nb will be for CDS exons only
-	ExSt also contains stuff that would be filtered out. It is basically generated once per input file. Delete it if input file has been modified.
-
-	UTRs won't be in exonSt file, just as the original \"exon\"
-	UTR output - ALL UTRs => some can be undet for 5' or 3' so it might be relevant to check that output
+	NOTE THAT: This pipeline expects that all repeat names are different, there will be issues if they are not
+         (this may happen for user's de novo libraries used for RM annotation; also, in older libraries there were 
+         repeats with same name but different class/fam - if this happens then the first occurence will be the one in the hash with TE info;
+         you can also correct that by using -TE). Note that repeat names will be matched in lower cases, so
+         if some repeat names are different just thanks to the case that will be a problem.
+         When the ERV can be identified as internal (-int or -I associated) then family of the TE is renamed with --int
 
 	--------------------------------
 	   FILTERING
@@ -157,23 +178,28 @@ DOCUMENTATION
 	If they correspond to exons, then the Exon Structure (ExSt) file and TrInfos output files will have it wrong. 
 	However the -parse will work correctly if you use -clean beforehand (or manually delete the ExSt file) 
 
-	+ filter out if intersection is < 9nt
-
-	--------------------------------
-	   REPEAT MASKER AND TE FILES
-	--------------------------------
-	When RM.out is converted to bed (quite long step if the file is big), nonTE sequences are filtered out and class and family are updated using 1) -TE and 2) -RMparsed if provided.
+	Note that by default, overlaps < 9nt are filtered out (-TEov option)
 	
-	This pipeline expects that all repeat names are different. 
-	In older libraries there were repeats with same name but different classfam - well if it happens then the first occurence will be the one in the hash with TE info.
-	You can also correct that by using -TE or by editing the file provided in -parseRM.
+	--------------------------------
+	   FILES CREATED DURING THE RUN
+	--------------------------------
+	- creates \"Exon Structure\" file, with a line per exon with some info added like exon type (FIRST, LAST, etc), transcript coordinates and mature transcript length
+	- extract features:
+		exons (split non coding and coding -> split in CDS and UTRs)
+		introns
+		XXkb up and down (depending what is set - ex. 10, 5 and 1)
+	- for introns and up+dw, <what-to-subtract.gtf or bed> will be subtracted from the sets => outputs are <file>.subtract.<name>.bed
+	- then all resulting files are intersected with TEs (RMout.out)
 
-	To get -parseRM file, you can use this script: https://github.com/4ureliek/Parsing-RepeatMasker-Outputs/blob/master/parseRM.pl
-	(with or without -lib option will work, column numbers will be corrected based on column headers)
+	This script relies on Transcript information, so gene info is not mandatory. 
+	However, it is better for analysis - note that GTF from the UCSC table browser use the same ID for gene and transcript
 
-	repeat names will be matched in lower cases. If some repeat names are different just thanks to the case that will be a problem.
+	When CDS, in ExSt file, exon nb will be for CDS exons only
+	ExSt also contains features that would be filtered out. 
+	It is basically generated once per input file, so you should delete it if the input file has been modified.
 
-	When the ERV can be identified as internal (-int or -I associated) then family of the TE is renamed with --int
+	UTRs won't be in exonSt file, just as the original \"exon\"
+	UTR output - ALL UTRs => some can be undetermined for 5' or 3' so it might be relevant to check that output
 
 	--------------------------------
 	   READ THE OUTPUTS
@@ -186,7 +212,7 @@ DOCUMENTATION
 	## ExSt file
 	----------------
 	   [ONLY for -f gtf => transcript analysis]
-	   File used internally summarizing all info about each exons
+	   File used internally, summarizing all info about each exons (but can be useful, to get the whole transcript structure)
 	
 	## TrInfos files 
 	----------------
