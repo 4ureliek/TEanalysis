@@ -39,7 +39,7 @@ Last update  :  Mars 2015
     BEDtools is required for this pipeline to run (Quinlan AR and Hall IM, 2010. Bioinformatics)
     Available at: https://github.com/arq5x/bedtools2
     
-  	 CITATION - please cite in the Methods:
+	CITATION - please put the GitHub link in Methods, and cite:
       - For this pipeline using -f gtf, cite Kapusta et al. (2013) PLoS Genetics
       - For this pipeline using -f bed, cite Lynch et al. (2015) Cell Reports
       - For the use of BEDtools, Quinlan AR and Hall IM (2010) Bioinformatics
