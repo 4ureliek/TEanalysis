@@ -36,7 +36,7 @@ Synopsis (v$version):
              -r <genome.range> [-b] -e <genome.gaps> [-d] [-i <include.range>] [-a] 
             [-l <if_nonTE>] [-t <filterTE>] [-c] [-w <bedtools_path>] [-v] [-h]
 
-    /!\\ REQUIRES: Bedtools, versionr ecent enough to include the Shuffle
+    /!\\ REQUIRES: Bedtools, at least v18 (but I advise updating up to the last version)
     /!\\ Previous outputs, if any, will be moved as *.previous [which means previous results are only saved once]
 
   DESCRIPTION:
