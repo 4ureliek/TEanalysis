@@ -9,7 +9,7 @@ use warnings;
 use Carp;
 use Getopt::Long;
 use Bio::SeqIO;
-use Math::CDF;
+use Statistics::R; #required to get the Binomial Test p-values
 
 #-----------------------------------------------------------------------------
 #------------------------------- DESCRIPTION ---------------------------------
@@ -17,7 +17,7 @@ use Math::CDF;
 #flush buffer
 $| = 1;
 
-my $version = "2.0";
+my $version = "2.1";
 my $scriptname = "TE-analysis_Shuffle_bed.pl";
 my $changelog = "
 #	- v1.0 = Mar 2016 
@@ -27,17 +27,26 @@ my $changelog = "
 #            attempt of making this faster by removing any length info and allowing overlaps 
 #            of shuffled features (since they are independent tests, it's OK)
 #            Also added the possibility of several files to -e and -i
+#   - v2.1 = Oct 2016
+#            remove empty column of length info from output
+#            get enrichment by age categories if age file provided
+#            bug fix for total counts of hit features when upper levels (by class or family, by Rname was probably OK)
+#            Changes in stats, bug fix; use R for the binomial test
 \n";
 
 my $usage = "
 Synopsis (v$version):
 
     perl $scriptname -f features.bed [-o <nt>] -s features_to_shuffle [-n <nb>] 
-             -r <genome.range> [-b] -e <genome.gaps> [-d] [-i <include.range>] [-a] 
-            [-l <if_nonTE>] [-t <filterTE>] [-c] [-w <bedtools_path>] [-v] [-h]
+             -r <genome.range> [-b] -e <genome.gaps> [-d] [-i <include.range>] [-a] [-w <bedtools_path>] 
+            [-l <if_nonTE>] [-t <filterTE>] [-c] [-g <TE,age,tab>] [-v] [-h]
 
     /!\\ REQUIRES: Bedtools, at least v18 (but I advise updating up to the last version)
     /!\\ Previous outputs, if any, will be moved as *.previous [which means previous results are only saved once]
+
+  CITATION:
+    - the GitHub link to this script, and you may also cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470) for now
+    - for BEDtools, Quinlan AR and Hall IM (2010) Bioinformatics (DOI: 10.1093/bioinformatics/btq033)
 
   DESCRIPTION:
     Features provided in -s will be overlapped with -i file (which must be simple intervals in bed format), 
@@ -53,6 +62,8 @@ Synopsis (v$version):
 
     Two-tailed permutation test ans a binomial test are done on the counts of overlaps. 
        The results are in a .stats.txt file. Note that high bootstraps takes a lot of time. 
+       Binomial is more sensitive.
+       Note that for low counts, expected and/or observed, stats likely don't mean much.
   
   MANDATORY ARGUMENTS:	
     -f,--feat     => (STRING) ChIPseq peaks, chromatin marks, etc, in bed format
@@ -90,6 +101,8 @@ Synopsis (v$version):
     -d,--dogaps   => (BOOL)   See above; use this and provide the genome fasta file if no gap file (-g)
                               If several files in -e, then the genome needs to be the first one.
                               This step is not optimized, it will take a while (but will create the required file)                       
+
+  OPTIONAL ARGUMENTS FOR BEDTOOLS SHUFFLING:
     -i,--incl     => (STRING) To use as -incl for bedtools shuffle: \"coordinates in which features from -i should be placed.\"
                               Bed of gff format. Could be intervals close to TSS for example.
                               More than one file (same format) may be provided (comma separated), 
@@ -97,6 +110,9 @@ Synopsis (v$version):
     -a,--add      => (BOOL)   to add the -noOverlapping option to the bedtools shuffle command line, 
                               and therefore NOT allow overlaps between the shuffled features.
                               This may create issues mostly if -i is used (space to shuffle may be too small to shuffle features)
+    -w,--where    => (STRING) if BEDtools are not in your path, provide path to BEDtools bin directory
+
+   OPTIONAL ARGUMENTS FOR TE FILTERING: 
     -l,--low      => (STRING) To set the behavior regarding non TE sequences: all, no_low, no_nonTE, none
                                  -t all = keep all non TE sequences (no filtering)
                                  -t no_low [default] = keep all besides low_complexity and simple_repeat
@@ -111,21 +127,31 @@ Synopsis (v$version):
     -c,--contain  => (BOOL)   to check if the \"name\" determined with -filter is included in the value in Repeat Masker output, instead of exact match
                               ex: -a name,HERVK -c => all fragments containing HERVK in their name
                                   -a family,hAT -c => all repeats with family containing hAT (...#DNA/hAT, ...#DNA/hAT-Charlie, etc)
-    -w,--where    => (STRING) if BEDtools are not in your path, provide path to BEDtools bin directory
+    -g,--group    => (STRING) provide a file with TE age: 
+                                 Rname  Rclass  Rfam  Rclass/Rfam  %div(avg)  lineage  age_category
+                              At least Rname and lineage are required (other columns can be \"na\"),
+                              and age_category can be empty. But if age_category has values, it will 
+                              be used as well. Typically:
+                                  TE1  LTR  ERVL-MaLR  LTR/ERVL-MaLR  24.6  Eutheria  Ancient
+                                  TE2  LTR  ERVL-MaLR  LTR/ERVL-MaLR   9.9  Primates  LineageSpe
+  
+   OPTIONAL ARGUMENTS (GENERAL): 
     -v,--version  => (BOOL)   print the version
     -h,--help     => (BOOL)   print this usage
 \n";
+
 
 #-----------------------------------------------------------------------------
 #------------------------------ LOAD AND CHECK -------------------------------
 #-----------------------------------------------------------------------------
 
-my ($input,$shuffle,$exclude,$dogaps,$build,$dobuild,$catout,$rprint,$f_regexp,$allow,$nooverlaps,$v,$help);
+my ($input,$shuffle,$exclude,$dogaps,$build,$dobuild,$f_regexp,$allow,$nooverlaps,$v,$help);
 my $inters = 10;
 my $nboot = 10;
 my $incl = "na";
 my $nonTE = "no_low";
 my $filter = "na";
+my $TEage = "na";
 my $bedtools = "";
 my $opt_success = GetOptions(
 			 	  'feat=s'		=> \$input,
@@ -141,6 +167,7 @@ my $opt_success = GetOptions(
 			 	  'low=s'		=> \$nonTE,
 			 	  'te=s'		=> \$filter,
 			 	  'contain'     => \$f_regexp,
+			 	  'group=s'     => \$TEage,
 			 	  'where=s'     => \$bedtools,
 			 	  'version'     => \$v,
 			 	  'help'		=> \$help,);
@@ -160,6 +187,7 @@ die "\n -n $nboot but should be an integer\n\n" if ($nboot !~ /\d+/);
 die "\n -i $inters but should be an integer\n\n" if ($inters !~ /\d+/);
 die "\n -w $bedtools does not exist?\n\n" if (($bedtools ne "") && (! -e $bedtools));
 die "\n -t requires 2 values separated by a coma (-t <name,filter>; use -h to see the usage)\n\n" if (($filter ne "na") && ($filter !~ /,/));
+die "\n -g $TEage does not exist?\n\n" if (($TEage ne "na") && (! -e $TEage));
 ($dogaps)?($dogaps = "y"):($dogaps = "n");
 ($dobuild)?($dobuild = "y"):($dobuild = "n");
 ($f_regexp)?($f_regexp = "y"):($f_regexp="n");
@@ -197,11 +225,16 @@ if (($incl ne "na") && ($incl =~ /,/)) {
 	$incl = concat_beds(\@include);
 }
 
+#Load TEage if any
+print STDERR " --- Loading TE ages from $TEage\n";
+my $age = ();
+$age = load_TEage($TEage,$v) unless ($TEage eq "na");
+
 #Now features to shuffle
 print STDERR " --- checking file in -s, print in .bed if not a .bed or gff file\n";
 print STDERR "     filtering TEs based on filter ($filter) and non TE behavior ($nonTE)\n" unless ($filter eq "na");
 print STDERR "     + getting genomic counts for each repeat\n";
-my ($toshuff_file,$parsedRM) = RMtobed($shuffle,$okseq,$filter,$f_regexp,$nonTE);
+my ($toshuff_file,$parsedRM) = RMtobed($shuffle,$okseq,$filter,$f_regexp,$nonTE,$age);
 
 #Outputs
 my $stats;
@@ -224,7 +257,7 @@ system "$intersectBed -a $toshuff_file -b $input -wo > $temp/no_boot.joined";
 #Process the joined files
 print STDERR " --- Check intersections of $input with features in $toshuff_file (observed)\n";
 my $no_boot;
-$no_boot = check_for_overlap("$temp/no_boot.joined","no_boot",$out,$inters,$input_feat,$no_boot);
+$no_boot = check_for_overlap("$temp/no_boot.joined","no_boot",$out,$inters,$input_feat,$no_boot,$age);
 
 #Now bootstrap runs
 print STDERR " --- Run $nboot bootstraps now (to get significance of the overlaps)\n";
@@ -235,29 +268,25 @@ my $boots = ();
 if ($nboot > 0) {
 	foreach (my $i = 1; $i <= $nboot; $i++) {
 		print STDERR "     ..$i bootstraps done\n" if (($i == 10) || ($i == 100) || ($i == 1000) || (($i > 1000) && (substr($i/1000,-1,1) == 0)));	
-#		print STDERR " --- BOOTSTRAP $i\n";	
-#		print STDERR "     Shuffle features with command line:\n";
 		my $shuffled = shuffle($toshuff_file,$temp_s,$i,$excl,$incl,$build_file,$bedtools,$nooverlaps);
-#		print STDERR " --- Intersect with command lines:\n";
-#		print STDERR "      $intersectBed -a $shuffled -b $input -wo > $temp/boot.$i.joined\n";
 		system "      $intersectBed -a $shuffled -b $input -wo > $temp/boot.$i.joined";
-#		print STDERR "   - Check intersections of $input with features in $shuffled (expected)\n";
-		$boots = check_for_overlap("$temp/boot.$i.joined","boot.".$i,$outb,$inters,$input_feat,$boots);
+		$boots = check_for_overlap("$temp/boot.$i.joined","boot.".$i,$outb,$inters,$input_feat,$boots,$age);
 		`cat $outb >> $outb.CAT.boot.txt` if (-e $outb);
 		`rm -Rf $temp/boot.$i.joined $shuffled`; #these files are now not needed anymore, all is stored
 	}
 }
-`rm -Rf $temp $temp_s`; #these folders are not needed anymore
-
 
 #Stats now
 print STDERR " --- Get and print stats\n" if ($nboot > 0);
-print_stats($stats,$no_boot,$boots,$nboot,$input_feat,$parsedRM,$scriptname,$version) if ($nboot > 0);
+print_stats($stats,$no_boot,$boots,$nboot,$input_feat,$parsedRM,$age,$scriptname,$version) if ($nboot > 0);
 
 #end
 print STDERR " --- $scriptname done\n";
 print STDERR "     Stats printed in: $stats.txt\n" if ($nboot > 0);
 print STDERR "\n";
+
+`rm -Rf $temp $temp_s`; #these folders are not needed anymore
+
 exit;
 
 
@@ -390,11 +419,34 @@ sub concat_beds {
 }
 
 #-----------------------------------------------------------------------------
+# Load TE age file
+# $age = load_TEage($TEage,$v) unless ($TEage eq "na");
+#-----------------------------------------------------------------------------
+sub load_TEage {
+	my $in = shift;
+	my %TEs = ();
+	open(my $in_fh, "<", $in) or confess "\n   ERROR (sub load_TEage): could not open to read $in $!\n";
+	LINE: while(<$in_fh>) {
+		chomp (my $line = $_);
+		next LINE if (($line !~ /\w/) || (substr($line,0,5) eq "Rname") || (substr($line,0,1) eq "#"));
+		my @TEs = split('\t', $line); 		
+		my $Rname = shift @TEs; #Rname not in values now, will be the key
+		$Rname =~ s/\//_/; #making sure no / in repeat name
+		$TEs[1] =~ s/\//_/; #making sure no / in family
+		$TEs[1] = $TEs[1]."--int" if (($TEs[1] =~ /ERV/) && (($Rname =~ /[-_][iI]nt/) || ($Rname =~ /[-_]I$/)));	
+		$TEs[2] = $TEs[0]."/".$TEs[1]; #correct class/fam
+		$TEs{$Rname} = \@TEs;
+	}	
+	close $in_fh;
+	return (\%TEs);
+}
+
+#-----------------------------------------------------------------------------
 # Convert RMoutput .out file to bed if needed
-# my ($toshuff_file,$parsedRM) = RMtobed($shuffle,$okseq,$filter,$f_regexp,$nonTE);
+# my ($toshuff_file,$parsedRM) = RMtobed($shuffle,$okseq,$filter,$f_regexp,$nonTE,$age);
 #-----------------------------------------------------------------------------
 sub RMtobed {
-	my ($file,$okseq,$filter,$f_regexp) = @_;
+	my ($file,$okseq,$filter,$f_regexp,$age) = @_;
 	my $parsed = ();
 	my ($f_type,$f_name) = split(",",$filter) unless ($filter eq "na");	
 	my $ok = $file;
@@ -403,7 +455,7 @@ sub RMtobed {
 	($filter eq "na")?($ok = $ok.".nonTE-$nonTE.bed"):($ok = $ok.".$f_name.bed");		
 	if (-e $ok) { #if has been filtered same way, OK, just get dictionary
 		print STDERR "     -> $ok exists, just getting dictionary from it\n";
-		$parsed = getparsedRM($ok,$parsed,"file");
+		$parsed = getparsedRM($ok,$parsed,"file",$age);
 		return ($ok,$parsed);
 	}
 	print STDERR "     -> $file is in bed format, but $ok does not exist; generating it...\n" if ($file =~ /(.*)\.bed$/);
@@ -462,7 +514,7 @@ sub RMtobed {
 		print $bed_fh "$chr\t$start\t$end\t$ID\t.\t$strand\n"; #with ID being the whole line => easy to acces to RMoutput original info
 		
 		#get dictionary
-		$parsed = getparsedRM(\@l,$parsed,"line");
+		$parsed = getparsedRM(\@l,$parsed,"line",$age);
 	}
 	close ($fh);
 	close ($bed_fh);
@@ -471,13 +523,13 @@ sub RMtobed {
 
 #-----------------------------------------------------------------------------
 # Get infos from RMout
-# $parsed = getparsedRM($file,$parsed,"file");
-# $parsed = getparsedRM(\@l,$parsed,"line");
+# $parsed = getparsedRM($file,$parsed,"file",$age);
+# $parsed = getparsedRM(\@l,$parsed,"line",$age);
 #-----------------------------------------------------------------------------
 sub getparsedRM {
 	my ($info,$parsed,$type) = @_;
 	if ($type eq "line") { #meaning it's read from the .out while being converted in .bed
-		$parsed = getparsedRMline($parsed,$info);
+		$parsed = getparsedRMline($parsed,$info,$age);
 	} else { #meaning it's already a bed file => open and read it
 		open(my $fh, "<$info") or confess "\n   ERROR (sub getparsedRM): could not open to read $info!\n";
 		LINE: while(<$fh>) {
@@ -486,7 +538,7 @@ sub getparsedRM {
 			next LINE if (($l =~ /^[Ss]core|^SW|^#/) || ($l !~ /\w/));
 			my @l = split('\s+',$l);
 			my @RMline = split(";",$l[3]);
-			$parsed = getparsedRMline($parsed,\@RMline);
+			$parsed = getparsedRMline($parsed,\@RMline,$age);
 		}
 		close $fh;	
 	}
@@ -495,11 +547,11 @@ sub getparsedRM {
 
 #-----------------------------------------------------------------------------
 # Get counts and length for each TE
-# $parsed = getparsedRMline($parsed,$info)
-# $parsed = getparsedRMline($parsed,\@RMline)
+# $parsed = getparsedRMline($parsed,$info,$age)
+# $parsed = getparsedRMline($parsed,\@RMline,$age)
 #-----------------------------------------------------------------------------
 sub getparsedRMline {
-	my ($parsed,$l) = @_;
+	my ($parsed,$l,$age) = @_;
 	my ($Rname,$classfam) = ($l->[9],$l->[10]);
 	my ($Rclass,$Rfam) = get_Rclass_Rfam($Rname,$classfam);
 	#now feed dictionary
@@ -507,6 +559,13 @@ sub getparsedRMline {
 	($parsed->{$Rclass}{'tot'}{'tot'})?($parsed->{$Rclass}{'tot'}{'tot'}++):($parsed->{$Rclass}{'tot'}{'tot'}=1);
 	($parsed->{$Rclass}{$Rfam}{'tot'})?($parsed->{$Rclass}{$Rfam}{'tot'}++):($parsed->{$Rclass}{$Rfam}{'tot'}=1);
 	($parsed->{$Rclass}{$Rfam}{$Rname})?($parsed->{$Rclass}{$Rfam}{$Rname}++):($parsed->{$Rclass}{$Rfam}{$Rname}=1);
+	#Also feed age if relevant
+	if ($age->{$Rname}) {
+		($parsed->{'age'}{'cat.1'}{'tot'})?($parsed->{'age'}{'cat.1'}{'tot'}++):($parsed->{'age'}{'cat.1'}{'tot'}=1);
+		($parsed->{'age'}{'cat.1'}{$age->{$Rname}[4]})?($parsed->{'age'}{'cat.1'}{$age->{$Rname}[4]}++):($parsed->{'age'}{'cat.1'}{$age->{$Rname}[4]}=1);
+		($parsed->{'age'}{'cat.2'}{$age->{$Rname}[5]})?($parsed->{'age'}{'cat.2'}{$age->{$Rname}[5]}++):($parsed->{'age'}{'cat.2'}{$age->{$Rname}[5]}=1);	
+	}	
+	$parsed->{'age'}{'cat.2'}{'tot'}=$parsed->{'age'}{'cat.1'}{'tot'};
 	return $parsed;
 }
 
@@ -568,13 +627,12 @@ sub shuffle {
 
 #-----------------------------------------------------------------------------
 # Check overlap with TEs and count for all TEs
-# $no_boot = check_for_overlap("$temp/no_boot.joined","no_boot",$out,$inters,$input_feat,$no_boot,$no_boot_feat_hit);
-# $boots = check_for_overlap("$temp/boot.$i.joined","boot.".$i,$outb,$inters,$input_feat,$boots);
+# $no_boot = check_for_overlap("$temp/no_boot.joined","no_boot",$out,$inters,$input_feat,$no_boot,$age);
+# $boots = check_for_overlap("$temp/boot.$i.joined","boot.".$i,$outb,$inters,$input_feat,$boots,$age);
 #-----------------------------------------------------------------------------
 sub check_for_overlap {
-	my ($file,$fileid,$out,$inters,$input_feat,$counts) = @_;
-	my $p = ();	
-	#now loop
+	my ($file,$fileid,$out,$inters,$input_feat,$counts,$age) = @_;
+	my $check = ();
 	open(my $fh, "<$file") or confess "\n   ERROR (sub check_for_overlap): could not open to read $file!\n";
 	LINE: while(<$fh>){
 		chomp(my $l = $_);
@@ -586,13 +644,44 @@ sub check_for_overlap {
 		my @rm = split(";",$l[3]);
 		my $Rnam = $rm[9];
 		my ($Rcla,$Rfam) = get_Rclass_Rfam($Rnam,$rm[10]);
-		#now increment in the data structure		
-		($counts->{$fileid}{'tot'}{'tot'}{'tot'}{'tot'})?($counts->{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}++):($counts->{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}=1);
-		($counts->{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'})?($counts->{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'}++):($counts->{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'}=1);
-		($counts->{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'})?($counts->{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'}++):($counts->{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'}=1);
-		($counts->{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'})?($counts->{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'}++):($counts->{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'}=1);		
+		#Increment in the data structure, but only if relevant
+		unless ($check->{$l[9]}{'tot'}) {
+			($counts->{$fileid}{'tot'}{'tot'}{'tot'}{'tot'})?($counts->{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}++):($counts->{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}=1);
+		}	
+		unless ($check->{$l[9]}{$Rcla}) {
+			($counts->{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'})?($counts->{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'}++):($counts->{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'}=1);
+			
+		}
+		unless ($check->{$l[9]}{$Rcla.$Rfam}) {
+			($counts->{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'})?($counts->{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'}++):($counts->{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'}=1);
+		}
+		unless ($check->{$l[9]}{$Rcla.$Rfam.$Rnam}) {
+			($counts->{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'})?($counts->{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'}++):($counts->{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'}=1);	
+		}
+				
+		#Need to check if a feature is counted several times in the upper classes
+		$check->{$l[9]}{'tot'}=1;
+		$check->{$l[9]}{$Rcla}=1;
+		$check->{$l[9]}{$Rcla.$Rfam}=1;
+		$check->{$l[9]}{$Rcla.$Rfam.$Rnam}=1;
+		#Age categories if any
+		if ($age->{$Rnam}) {
+			unless ($check->{$l[9]}{'age'}) { #easier to load tot hit with these keys for the print_out sub
+				($counts->{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'})?($counts->{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'}++):($counts->{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'}=1); 
+			}
+			unless ($check->{$l[9]}{$age->{$Rnam}[4]}) {
+				($counts->{$fileid}{'age'}{'cat.1'}{$age->{$Rnam}[4]}{'tot'})?($counts->{$fileid}{'age'}{'cat.1'}{$age->{$Rnam}[4]}{'tot'}++):($counts->{$fileid}{'age'}{'cat.1'}{$age->{$Rnam}[4]}{'tot'}=1);
+			}
+			if (($age->{$Rnam}[5]) && (! $check->{$l[9]}{$age->{$Rnam}[5]})) {
+				($counts->{$fileid}{'age'}{'cat.2'}{$age->{$Rnam}[5]}{'tot'})?($counts->{$fileid}{'age'}{'cat.2'}{$age->{$Rnam}[5]}{'tot'}++):($counts->{$fileid}{'age'}{'cat.2'}{$age->{$Rnam}[5]}{'tot'}=1);
+			}
+			$check->{$l[9]}{'age'}=1;
+			$check->{$l[9]}{$age->{$Rnam}[4]}=1;
+			$check->{$l[9]}{$age->{$Rnam}[5]}=1;
+		}
 	}
 	close ($fh);		
+	$counts->{$fileid}{'age'}{'cat.2'}{'tot'}{'tot'}=$counts->{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'};
 	#Now print stuff and exit
 #	print STDERR "     print details in files with name base = $out\n";	
 	print_out($counts,$fileid,$input_feat,$out);	
@@ -627,11 +716,13 @@ sub get_Rclass_Rfam {
 sub print_out {
 	my ($counts,$fileid,$input_feat,$out) = @_;	
 	foreach my $Rclass (keys %{$counts->{$fileid}}) {
-		print_out_sub($fileid,$Rclass,"tot","tot",$counts,$input_feat,$out.".Rclass");
+		print_out_sub($fileid,$Rclass,"tot","tot",$counts,$input_feat,$out.".Rclass") if ($Rclass ne "age");
 		foreach my $Rfam (keys %{$counts->{$fileid}{$Rclass}}) {
-			print_out_sub($fileid,$Rclass,$Rfam,"tot",$counts,$input_feat,$out.".Rfam");
-			foreach my $Rname (keys %{$counts->{$fileid}{$Rclass}{$Rfam}}) {						
-				print_out_sub($fileid,$Rclass,$Rfam,$Rname,$counts,$input_feat,$out.".Rname");
+			print_out_sub($fileid,$Rclass,$Rfam,"tot",$counts,$input_feat,$out.".Rfam") if ($Rclass ne "age");			
+			foreach my $Rname (keys %{$counts->{$fileid}{$Rclass}{$Rfam}}) {					
+				print_out_sub($fileid,$Rclass,$Rfam,$Rname,$counts,$input_feat,$out.".Rname") if ($Rclass ne "age");
+				print_out_sub($fileid,$Rclass,$Rfam,$Rname,$counts,$input_feat,$out.".age1") if (($Rclass eq "age") && ($Rfam eq "cat.1"));				
+				print_out_sub($fileid,$Rclass,$Rfam,$Rname,$counts,$input_feat,$out.".age2") if (($Rclass eq "age") && ($Rfam eq "cat.2"));
 			}
 		}
 	}
@@ -643,45 +734,44 @@ sub print_out {
 #-----------------------------------------------------------------------------
 sub print_out_sub {
 	my ($fileid,$key1,$key2,$key3,$counts,$input_feat,$out) = @_;
-	my $tothit = $counts->{$fileid}{'tot'}{'tot'}{'tot'}{'tot'};	
+	my $tothit = $counts->{$fileid}{'tot'}{'tot'}{'tot'}{'tot'};
 	my $hit = $counts->{$fileid}{$key1}{$key2}{$key3}{'tot'};
 	my $unhit = $input_feat->{'nb'}-$hit;
-	my $len = $counts->{$fileid}{$key1}{$key2}{$key3}{'len'}{'tot'};
+#	my $len = $counts->{$fileid}{$key1}{$key2}{$key3}{'len'}{'tot'};
 	open (my $fh, ">>", $out) or confess "ERROR (sub print_out_sub): can't open to write $out $!\n";
-				#fileid, class, fam, name, hits, total features loaded, unhit feat, total feat hit all categories, len
-	print $fh "$fileid\t$key1\t$key2\t$key3\t$hit\t$input_feat->{'nb'}\t$unhit\t$tothit\tlen\n";
+				#fileid, class, fam, name, hits, total features loaded, unhit feat, total feat hit all categories, len <= removed length info
+	print $fh "$fileid\t$key1\t$key2\t$key3\t$hit\t$input_feat->{'nb'}\t$unhit\t$tothit\n";
 	close $fh;
     return 1;
 }
 
 #-----------------------------------------------------------------------------
-# Print Stats (permutation test basically) + associated subroutines
-# print_stats($stats,$no_boot,$boots,$nboot,$input_feat,$parsedRM,$scriptname,$version) if ($nboot > 0);
+# Print Stats (permutation test + binomial) + associated subroutines
+# print_stats($stats,$no_boot,$boots,$nboot,$input_feat,$parsedRM,$age,$scriptname,$version) if ($nboot > 0);
 #-----------------------------------------------------------------------------
 sub print_stats {
-	my ($out,$obs,$boots,$nboot,$input_feat,$parsedRM,$scriptname,$version) = @_;
+	my ($out,$obs,$boots,$nboot,$input_feat,$parsedRM,$age,$scriptname,$version) = @_;
 	
 	#get the boot avg values, sds, agregate all values
 	#For obs, just have first key = no_boot
 	my $exp = get_stats_data($boots,$nboot,$obs,$out,$input_feat,$parsedRM);
+	$exp = binomial_test_R($exp);
 	
 	#now print; permutation test + binomial test with avg lengths
 	my $midval = $nboot/2;
 	open (my $fh, ">", $out.".txt") or confess "ERROR (sub print_stats): can't open to write $out.txt $!\n";	
 	print $fh "#Script $scriptname, v$version\n";
 	print $fh "#Aggregated results + stats\n";
-#	print $fh "#Features in input file:\n\t$input_feat->{'nb'}\t(counts)\tand\t$input_feat->{'len'}\t(amount of DNA)\n";
 	print $fh "#Features in input file (counts):\n\t$input_feat->{'nb'}\n";
 	print $fh "#With $nboot bootstraps for exp (expected); sd = standard deviation; nb = number; len = length; avg = average\n";
 	print $fh "#Two tests are made (permutation and binomial) to assess how significant the difference between observed and random, so two pvalues are given\n";
-	print $fh "#The binomial test is not 2 sided, so it only tests for enrichment in observed values\n";
-	print $fh "#A pvalue cannot be 0, so when the probability is 1 (meaning enrichment of this repeat in the observed set), pvalue is set to na, but the significance is ***\n";
 	print $fh "#For the two tailed permutation test:\n";
 	print $fh "#if rank is < $midval and pvalue is not \"ns\", there are significantly fewer observed values than expected \n";
 	print $fh "#if rank is > $midval and pvalue is not \"ns\", there are significantly higher observed values than expected \n";
+	print $fh "#The binomial test is done with binom.test from R, two sided\n";
+	
 	print $fh "\n#Level_(tot_means_all)\t#\t#\t#COUNTS\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\t#\n";
-	print $fh "#Rclass\tRfam\tRname\tobs_nb_of_hits\t%_obs_nb_(%of_features)\tobs_tot_nb_of_hits\texp_nb_avg_of_hits\texp_nb_sd\t%_exp_nb_(%of_features)\texp_tot_nb_of_hits(avg)\tobs_rank_in_exp\t2-tailed_permutation-test_pvalue(obs.vs.exp)\tsignificance\tnb_binomal_test_proba(obs.vs.exp)\tnb_binomal_test_pvalue(1-proba)\tsignificance\tobs_len\t%_obs_len_(%of_features)\tobs_tot_len\texp_len_avg\texp_len_sd\t%_exp_len_(%of_features)\texp_tot_len(avg)\tobs_rank_in_exp\t2-tailed_permutation-test_pvalue(obs.vs.exp)\tsignificance\tlen_binomal_test_proba(obs.vs.exp)\tlen_binomal_test_pvalue(1-proba)\tsignificance\n\n";
-
+	print $fh "#Rclass\tRfam\tRname\tobs_hits\t%_obs_(%of_features)\tobs_tot_hits\tnb_of_trials(nb_of_TE_in_genome)\texp_avg_hits\texp_sd\t%_exp_(%of_features)\texp_tot_hits(avg)\tobs_rank_in_exp\t2-tailed_permutation-test_pvalue(obs.vs.exp)\tsignificance\tbinomal_test_proba_under.represented(obs.vs.exp)\tbinomal_test_proba\tbinomial_test_95%_confidence_interval\t_binomial_test_pval\n\n";
 	foreach my $Rclass (keys %{$exp}) { #loop on all the repeat classes; if not in the obs then it will be 0 for obs values			
 		foreach my $Rfam (keys %{$exp->{$Rclass}}) {			
 			foreach my $Rname (keys %{$exp->{$Rclass}{$Rfam}}) {
@@ -695,23 +785,21 @@ sub print_stats {
 				$expper = $expavg/$input_feat->{'nb'}*100 unless ($expavg == 0);
 				#stats
 				my $pval_nb = $exp->{$Rclass}{$Rfam}{$Rname}{'pval'};		
-				$pval_nb = "na" if (($expavg == 0) && ($obsnb == 0));		
-								
+				$pval_nb = "na" if (($expavg == 0) && ($obsnb == 0));									
 				#Now print stuff
 				print $fh "$Rclass\t$Rfam\t$Rname\t";
 				print $fh "$obsnb\t$obsper\t$obs->{'no_boot'}{'tot'}{'tot'}{'tot'}{'tot'}\t"; 
+				print $fh "$parsedRM->{$Rclass}{$Rfam}{$Rname}\t"; 
 				print $fh "$expavg\t$exp->{$Rclass}{$Rfam}{$Rname}{'sd'}\t$expper\t$exp->{'tot'}{'tot'}{'tot'}{'avg'}\t";			
 				my $sign = get_sign($pval_nb);				
-				print $fh "$exp->{$Rclass}{$Rfam}{$Rname}{'rank'}\t$pval_nb\t$sign\t";
-				$exp->{$Rclass}{$Rfam}{$Rname}{'binom_proba'} = "na" unless ($exp->{$Rclass}{$Rfam}{$Rname}{'binom_proba'});
-				$exp->{$Rclass}{$Rfam}{$Rname}{'binom_pval'} = "na" unless ($exp->{$Rclass}{$Rfam}{$Rname}{'binom_pval'});
+				print $fh "$exp->{$Rclass}{$Rfam}{$Rname}{'rank'}\t$pval_nb\t$sign\t";								
+				#Binomial
 				$sign = get_sign($exp->{$Rclass}{$Rfam}{$Rname}{'binom_pval'});
-				$sign = "***" if ($exp->{$Rclass}{$Rfam}{$Rname}{'binom_proba'} == 1);
-				print $fh "$exp->{$Rclass}{$Rfam}{$Rname}{'binom_proba'}\t$exp->{$Rclass}{$Rfam}{$Rname}{'binom_pval'}\t$sign\n";	
+				print $fh "$exp->{$Rclass}{$Rfam}{$Rname}{'binom_prob'}\t$exp->{$Rclass}{$Rfam}{$Rname}{'binom_conf'}\t$exp->{$Rclass}{$Rfam}{$Rname}{'binom_pval'}\t$sign\n";	
 			}
 		}
 	}
-	close $fh;
+close $fh;
     return 1;
 }
 
@@ -724,14 +812,16 @@ sub get_stats_data {
 	my $exp = ();
 
 	#agregate data
-	my ($nb_c,$len_c,$nb_f,$len_f,$nb_r,$len_r) = ();
+	my ($nb_c,$nb_f,$nb_r,$nb_a1,$nb_a2) = ();
 	foreach my $round (keys %{$counts}) {
 		foreach my $Rclass (keys %{$counts->{$round}}) {
-			push(@{$nb_c->{$Rclass}{'tot'}{'tot'}},$counts->{$round}{$Rclass}{'tot'}{'tot'}{'tot'});	
+			push(@{$nb_c->{$Rclass}{'tot'}{'tot'}},$counts->{$round}{$Rclass}{'tot'}{'tot'}{'tot'}) if ($Rclass ne "age");	
 			foreach my $Rfam (keys %{$counts->{$round}{$Rclass}}) {
-				push(@{$nb_f->{$Rclass}{$Rfam}{'tot'}},$counts->{$round}{$Rclass}{$Rfam}{'tot'}{'tot'});	
+				push(@{$nb_f->{$Rclass}{$Rfam}{'tot'}},$counts->{$round}{$Rclass}{$Rfam}{'tot'}{'tot'}) if ($Rclass ne "age");		
 				foreach my $Rname (keys %{$counts->{$round}{$Rclass}{$Rfam}}) {
-					push(@{$nb_r->{$Rclass}{$Rfam}{$Rname}},$counts->{$round}{$Rclass}{$Rfam}{$Rname}{'tot'});	
+					push(@{$nb_r->{$Rclass}{$Rfam}{$Rname}},$counts->{$round}{$Rclass}{$Rfam}{$Rname}{'tot'}) if ($Rclass ne "age");	
+					push(@{$nb_a1->{$Rclass}{$Rfam}{$Rname}},$counts->{$round}{$Rclass}{$Rfam}{$Rname}{'tot'}) if (($Rclass eq "age") && ($Rfam eq "cat.1"));
+					push(@{$nb_a2->{$Rclass}{$Rfam}{$Rname}},$counts->{$round}{$Rclass}{$Rfam}{$Rname}{'tot'}) if (($Rclass eq "age") && ($Rfam eq "cat.2"));
 				}
 			}
 		}		
@@ -740,11 +830,13 @@ sub get_stats_data {
 	#get avg, sd and p values now => load in new hash, that does not have the fileID
 	foreach my $round (keys %{$counts}) {
 		foreach my $Rclass (keys %{$counts->{$round}}) {
-			$exp = get_data($Rclass,"tot","tot",$nb_c->{$Rclass}{'tot'}{'tot'},$exp,$obs,$nboot,$input_feat,$parsedRM);
+			$exp = get_data($Rclass,"tot","tot",$nb_c->{$Rclass}{'tot'}{'tot'},$exp,$obs,$nboot,$parsedRM) if ($Rclass ne "age");	
 			foreach my $Rfam (keys %{$counts->{$round}{$Rclass}}) {
-				$exp = get_data($Rclass,$Rfam,"tot",$nb_f->{$Rclass}{$Rfam}{'tot'},$exp,$obs,$nboot,$input_feat,$parsedRM);
+				$exp = get_data($Rclass,$Rfam,"tot",$nb_f->{$Rclass}{$Rfam}{'tot'},$exp,$obs,$nboot,$parsedRM) if ($Rclass ne "age");	
 				foreach my $Rname (keys %{$counts->{$round}{$Rclass}{$Rfam}}) {
-					$exp = get_data($Rclass,$Rfam,$Rname,$nb_r->{$Rclass}{$Rfam}{$Rname},$exp,$obs,$nboot,$input_feat,$parsedRM);
+					$exp = get_data($Rclass,$Rfam,$Rname,$nb_r->{$Rclass}{$Rfam}{$Rname},$exp,$obs,$nboot,$parsedRM) if ($Rclass ne "age");
+					$exp = get_data($Rclass,$Rfam,$Rname,$nb_a1->{$Rclass}{$Rfam}{$Rname},$exp,$obs,$nboot,$parsedRM) if (($Rclass eq "age") && ($Rfam eq "cat.1"));
+					$exp = get_data($Rclass,$Rfam,$Rname,$nb_a2->{$Rclass}{$Rfam}{$Rname},$exp,$obs,$nboot,$parsedRM) if (($Rclass eq "age") && ($Rfam eq "cat.2"));
 				}
 			}
 		}		
@@ -759,17 +851,16 @@ sub get_stats_data {
 # called by get_stats_data, to get average, sd, rank and p value for all the lists
 #-----------------------------------------------------------------------------	
 sub get_data {
-	my ($key1,$key2,$key3,$agg_data,$exp,$obs,$nboot,$input_feat,$parsedRM) = @_;	
+	my ($key1,$key2,$key3,$agg_data,$exp,$obs,$nboot,$parsedRM) = @_;	
 	#get average and sd of the expected
 	($exp->{$key1}{$key2}{$key3}{'avg'},$exp->{$key1}{$key2}{$key3}{'sd'}) = get_avg_and_sd($agg_data);
 	
 	my $observed = $obs->{'no_boot'}{$key1}{$key2}{$key3}{'tot'};
-	print STDERR "FYI: no observed value for {$key1}{$key2}{$key3}{'tot'}\n" unless ($observed);
-	$observed = 0 unless ($observed);
-	
+#	print STDERR "FYI: no observed value for {$key1}{$key2}{$key3}{'tot'}\n" unless ($observed);
+	$observed = 0 unless ($observed);	
 	
 	#Get the rank of the observed value in the list of expected + pvalue for the permutation test
-	my $rank = 1; #pvalue can't be 0
+	my $rank = 1; #pvalue can't be 0, so I have to start there - that does mean there will be a rank nboot+1
 	my @data = sort {$a <=> $b} @{$agg_data};
 	EXP: foreach my $exp (@data) {
 		last EXP if ($exp > $observed);
@@ -779,20 +870,19 @@ sub get_data {
 	if ($rank <= $nboot/2) {
 		$exp->{$key1}{$key2}{$key3}{'pval'}=$rank/$nboot*2;
 	} else {
-		$exp->{$key1}{$key2}{$key3}{'pval'}=(abs($nboot-$rank))/$nboot*2;
+		$exp->{$key1}{$key2}{$key3}{'pval'}=($nboot+2-$rank)/$nboot*2; #+2 so it is symetrical (around nboot+1)
 	}
 		
-	#Binomial test
-	# http://search.cpan.org/~callahan/Math-CDF-0.1/CDF.pm
-	# $prob = pbinom($x, $n, $p)
-	# Generates cumulative probabilities from the Binomial distribution. 
-	# This is the probability of having $x or fewer successes in $n trials when each trial has a $p probability of success. 
-	# $x should be in the range of [0,$n], $n should be in the range (0,Inf) and $p should be in [0,1].	
-	my $n = $parsedRM->{$key1}{$key2}{$key3};
+	#get all the values needed for binomial test in R => do them all at once
+	my $n = 0;
+	$n = $parsedRM->{$key1}{$key2}{$key3};
 	my $x = $observed;
-	my $p = $exp->{$key1}{$key2}{$key3}{'avg'}/$n;
-	$exp->{$key1}{$key2}{$key3}{'binom_proba'} = Math::CDF::pbinom($x, $n, $p);
-	$exp->{$key1}{$key2}{$key3}{'binom_pval'} = 1 - $exp->{$key1}{$key2}{$key3}{'binom_proba'};	
+	my $p = 0;
+	print STDERR "        WARN: no value for total number (from parsed RM table), for {$key1}{$key2}{$key3}? => no binomial test\n" if ($n == 0);
+	$p=$exp->{$key1}{$key2}{$key3}{'avg'}/$n unless ($n == 0); #should not happen, but could
+	$exp->{$key1}{$key2}{$key3}{'p'} = $p;
+	$exp->{$key1}{$key2}{$key3}{'n'} = $n;
+	$exp->{$key1}{$key2}{$key3}{'x'} = $x;
 	return($exp);
 }
 
@@ -834,3 +924,40 @@ sub get_sign {
 	}
 	return($sign);
 }
+
+#-----------------------------------------------------------------------------
+# sub binomial_test_R
+# $exp = binomial_test_R($exp);
+#-----------------------------------------------------------------------------
+sub binomial_test_R {
+	my ($exp) = @_;
+	#Start R bridge
+	my $R = Statistics::R->new() ;
+	$R->startR ;
+	foreach my $k1 (keys %{$exp}) { 	
+		foreach my $k2 (keys %{$exp->{$k1}}) {			
+			KEY: foreach my $k3 (keys %{$exp->{$k1}{$k2}}) {
+				my ($x,$n,$p) = ($exp->{$k1}{$k2}{$k3}{'x'},$exp->{$k1}{$k2}{$k3}{'n'},$exp->{$k1}{$k2}{$k3}{'p'});
+				#set values
+				($exp->{$k1}{$k2}{$k3}{'binom_prob'},$exp->{$k1}{$k2}{$k3}{'binom_conf'},$exp->{$k1}{$k2}{$k3}{'binom_pval'}) = ("na","na","na");
+				print STDERR "        WARN: no value for total number (from parsed RM table), for {$k1}{$k2}{$k3}? => no binomial test\n" if ($n == 0);
+				next KEY if ($n == 0);								
+				print STDERR "        WARN: expected overlaps (avg) > total number (from parsed RM table), for {$k1}{$k2}{$k3}, likely due to multiple peaks overlapping with the repeat => no binomial test\n" if ($p > 1);				
+				next KEY if ($p > 1);								
+				$R->send(qq`d<-binom.test($x,$n,$p,alternative="two.sided")`);				
+				my $data = $R->get('d');		
+				my @data = @{$data};
+				DATA: for (my $i=0; $i<$#data; $i++) {		
+ 					$exp->{$k1}{$k2}{$k3}{'binom_pval'} = $data->[$i+2] if ($data->[$i] eq "p-value");
+ 					$exp->{$k1}{$k2}{$k3}{'binom_conf'} = "$data->[$i+2];$data->[$i+3]" if ($data->[$i] eq "confidence");
+ 				}
+ 				$exp->{$k1}{$k2}{$k3}{'binom_prob'} = $data->[-1];
+			}
+		}
+	}
+	$R->stopR() ;
+	return($exp);
+}
+
+
+
