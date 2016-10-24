@@ -255,11 +255,11 @@ Last update  :  Mar 21 2016
     /!\ REQUIRES: Bedtools, at least v18 (but I advise updating up to the last version)
     /!\ Previous outputs, if any, will be moved as *.previous [which means previous results are only saved once]
 
-  CITATION:
+    CITATION:
     - the GitHub link to this script, and you may also cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470) for now
     - for BEDtools, Quinlan AR and Hall IM (2010) Bioinformatics (DOI: 10.1093/bioinformatics/btq033)
 
-  DESCRIPTION:
+    DESCRIPTION:
     Features provided in -s will be overlapped with -i file (which must be simple intervals in bed format), 
        without (no_boot) or with (boot) shuffling (on same chromosome)
        One feature may overlap with several repeats and all are considered.
@@ -276,7 +276,7 @@ Last update  :  Mar 21 2016
        Binomial is more sensitive.
        Note that for low counts, expected and/or observed, stats likely don't mean much.
   
-  MANDATORY ARGUMENTS:	
+    MANDATORY ARGUMENTS:	
     -f,--feat     => (STRING) ChIPseq peaks, chromatin marks, etc, in bed format
                               /!\ Script assumes no overlap between peaks
     -s,--shuffle  => (STRING) Features to shuffle = TE file
@@ -286,7 +286,7 @@ Last update  :  Mar 21 2016
                               File should be: Name \\t length
                               Can be files from UCSC, files *.chrom.sizes
                               If you don't have such file, use -b (--build) and provide the genome fasta file for -r                               
-    -e,--excl     => (STRING) This will be used as -excl for bedtools shuffle: \"coordinates in which features from -i should not be placed.\"
+    -e,--excl     => (STRING) This will be used as -excl for bedtools shuffle: "coordinates in which features from -i should not be placed."
                               More than one file may be provided (comma separated), they will be concatenated 
                               (in a file = first-file-name.cat.bed).
                               By default, at least one file is required = assembly gaps, and it needs to be the first file
@@ -300,7 +300,7 @@ Last update  :  Mar 21 2016
                                         (this can be changed in the load_gap subroutine)         
                                      -> 3% of the shuffled feature may overlap with these regions 
                                         (this can be changed in the shuffle subroutine).
-  OPTIONAL ARGUMENTS:
+    OPTIONAL ARGUMENTS:
     -o,--overlap  => (INT)    Minimal length (in nt) of intersection in order to consider the TE included in the feature.
                               Default = 10 (to match the TEanalysis-pipeline.pl)
     -n,--nboot    => (STRING) number of bootsraps with shuffled -s file
@@ -313,8 +313,8 @@ Last update  :  Mar 21 2016
                               If several files in -e, then the genome needs to be the first one.
                               This step is not optimized, it will take a while (but will create the required file)                       
 
-  OPTIONAL ARGUMENTS FOR BEDTOOLS SHUFFLING:
-    -i,--incl     => (STRING) To use as -incl for bedtools shuffle: \"coordinates in which features from -i should be placed.\"
+    OPTIONAL ARGUMENTS FOR BEDTOOLS SHUFFLING:
+    -i,--incl     => (STRING) To use as -incl for bedtools shuffle: "coordinates in which features from -i should be placed."
                               Bed of gff format. Could be intervals close to TSS for example.
                               More than one file (same format) may be provided (comma separated), 
                               they will be concatenated (in a file = first-file-name.cat.bed)
@@ -323,7 +323,7 @@ Last update  :  Mar 21 2016
                               This may create issues mostly if -i is used (space to shuffle may be too small to shuffle features)
     -w,--where    => (STRING) if BEDtools are not in your path, provide path to BEDtools bin directory
 
-   OPTIONAL ARGUMENTS FOR TE FILTERING: 
+    OPTIONAL ARGUMENTS FOR TE FILTERING: 
     -l,--low      => (STRING) To set the behavior regarding non TE sequences: all, no_low, no_nonTE, none
                                  -t all = keep all non TE sequences (no filtering)
                                  -t no_low [default] = keep all besides low_complexity and simple_repeat
@@ -346,6 +346,6 @@ Last update  :  Mar 21 2016
                                   TE1  LTR  ERVL-MaLR  LTR/ERVL-MaLR  24.6  Eutheria  Ancient
                                   TE2  LTR  ERVL-MaLR  LTR/ERVL-MaLR   9.9  Primates  LineageSpe
   
-   OPTIONAL ARGUMENTS (GENERAL): 
+    OPTIONAL ARGUMENTS (GENERAL): 
     -v,--version  => (BOOL)   print the version
     -h,--help     => (BOOL)   print this usage
