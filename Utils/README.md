@@ -217,7 +217,7 @@ Last update  :  Mar 31 2016
     -d,--dogaps   => (BOOL)   See above; use this and provide the genome fasta file if no gap file (-g)
                               If several files in -e, then the genome needs to be the first one.
                               This step is not optimized, it will take a while (but will create the required file)                       
-    -i,--incl     => (STRING) To use as -incl for bedtools shuffle: \"coordinates in which features from -i should be placed.\"
+    -i,--incl     => (STRING) To use as -incl for bedtools shuffle: "coordinates in which features from -i should be placed."
                               Bed of gff format. Could be intervals close to transcripts for example.
                               More than one file (same format) may be provided (comma separated), 
                               they will be concatenated (in a file = first-file-name.cat.bed)
@@ -235,7 +235,7 @@ Last update  :  Mar 31 2016
                               ex: -a name,nhAT1_ML => only fragments corresponding to the repeat named exactly nhAT1_ML will be looked at
                                   -a class,DNA => all repeats with class named exactly DNA (as in ...#DNA/hAT or ...#DNA/Tc1)
                                   -a family,hAT => all repeats with family named exactly hAT (so NOT ...#DNA/hAT-Charlie for example)
-    -c,--contain  => (BOOL)   to check if the \"name\" determined with -filter is included in the value in Repeat Masker output, instead of exact match
+    -c,--contain  => (BOOL)   to check if the "name" determined with -filter is included in the value in Repeat Masker output, instead of exact match
                               ex: -a name,HERVK -c => all fragments containing HERVK in their name
                                   -a family,hAT -c => all repeats with family containing hAT (...#DNA/hAT, ...#DNA/hAT-Charlie, etc)
     -w,--where    => (STRING) if BEDtools are not in your path, provide path to BEDtools bin directory
@@ -246,7 +246,7 @@ Last update  :  Mar 31 2016
 TE-analysis_Shuffle_bed
 =====
 version 2.1
-Last update  :  Mar 21 2016
+Last update  :  Oct 24 2016
 
      perl $scriptname -f features.bed [-o <nt>] -s features_to_shuffle [-n <nb>] 
              -r <genome.range> [-b] -e <genome.gaps> [-d] [-i <include.range>] [-a] [-w <bedtools_path>] 
