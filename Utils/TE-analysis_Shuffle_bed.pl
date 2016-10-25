@@ -197,6 +197,7 @@ $bedtools = $bedtools."/" if (($bedtools ne "") && (substr($bedtools,-1,1) ne "/
 #-----------------------------------------------------------------------------
 #----------------------------------- MAIN ------------------------------------
 #-----------------------------------------------------------------------------
+#Prep steps
 print STDERR "\n --- $scriptname v$version\n";
 
 #Genome range
@@ -460,8 +461,8 @@ sub RMtobed {
 	}
 	print STDERR "     -> $file is in bed format, but $ok does not exist; generating it...\n" if ($file =~ /(.*)\.bed$/);
 	#now it means RM.out, or that the proper bed file does not exist => make it a bed file + load the parsing hash	
-	open(my $fh, "<$file") or confess "\n   ERROR (sub RMtobed): could not open to read $file!\n";
-	open(my $bed_fh, ">$ok") or confess "\n   ERROR (sub RMtobed): could not open to write $ok!\n";
+	open(my $fh, "<$file") or confess "\n   ERROR (sub RMtobed): could not open to read $file $!\n";
+	open(my $bed_fh, ">$ok") or confess "\n   ERROR (sub RMtobed): could not open to write $ok $!\n";
 	LINE: while(<$fh>) {
 		chomp(my $l = $_);
 		my @l = ();
@@ -527,7 +528,7 @@ sub RMtobed {
 # $parsed = getparsedRM(\@l,$parsed,"line",$age);
 #-----------------------------------------------------------------------------
 sub getparsedRM {
-	my ($info,$parsed,$type) = @_;
+	my ($info,$parsed,$type,$age) = @_;
 	if ($type eq "line") { #meaning it's read from the .out while being converted in .bed
 		$parsed = getparsedRMline($parsed,$info,$age);
 	} else { #meaning it's already a bed file => open and read it
