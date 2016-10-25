@@ -587,7 +587,7 @@ sub check_for_featured_overlap {
 				next LINE unless ($ilen >= $inters);
 				my @rm = split(";",$l[3]);
 				my $Rnam = $rm[9];
-				my ($Rcla,$Rfam) = TEsuffle::get_Rclass_Rfam($Rnam,$rm[10]);
+				my ($Rcla,$Rfam) = TEshuffle::get_Rclass_Rfam($Rnam,$rm[10]);
 				#Increment in the data structure, but only if relevant = avoid counting hits several times
 				unless ($checkTE{$l[14]}{$cat}{$type}{'tot'}) {
 					($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'})?($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}++):($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}=1);
