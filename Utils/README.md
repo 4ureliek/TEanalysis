@@ -118,14 +118,14 @@ Last update  :  Apr 2016
      -h,--help    => (BOOL)   print this usage
 
 
-TE-analysis_Shuffle
+TE-analysis_Shuffle_tr
 =====
-version 4.0
-Last update  :  Mar 31 2016
+version 5.0
+Last update  :  Oct 25 2016
 
-    perl TE-analysis_Shuffle.pl -l lncRNA.gff -p prot.gff [-o <X>] [-m <X>] -s features_to_shuffle [-n <X>] 
-                               [-f] -e exclude.range [-d] -r genome.range [-b] [-i include.range] [-a] 
-                               [-l no_low] [-t <type,name>] [-c] [-w <bedtools_path>] [-v] [-h]
+    perl TE-analysis_Shuffle_tr.pl -l lncRNA.gff -p prot.gff [-o <X>] [-m <X>] -s features_to_shuffle [-n <X>] 
+                                  [-f] -e exclude.range [-d] -r genome.range [-b] [-i include.range] [-a]  [-w <bedtools_path>]  
+                                  [-l no_low] [-t <type,name>] [-c] [-g <TE.age.tab>] [-v] [-h]
 
     /!\\ REQUIRES - Bedtools, v2.25+
 	              - GAL::Annotation version later than Jan 2016 [update of is_coding]
@@ -159,7 +159,7 @@ Last update  :  Mar 31 2016
     
     Note that one exon may have several types of overlaps (e.g. "SPL" and "exonized"),
     but each exon is counted only one time for each category (important for "exonized").
-    However for the results per repeat, each hit is counted, unless it's the same TE
+    Similarly for TEs, each hit is counted unless it's the same repeat name / family / class (depending on the level)
    
     If you need to generate the <genome.gaps> file but you would also like to add more files to the -e option, 
     just do a first run with no bootstraps (in this example the genome.range is also being generated):
@@ -172,7 +172,8 @@ Last update  :  Mar 31 2016
     Note that the output *.stats.cat.txt is basically included in the output *.stats.TE.txt,
     with values of tot tot tot in the columns Rclass, Rfam and Rname
     The use of -f will take longer but requires fewer bootsraps, 
-    because binomial test is more sensitive.     
+    because binomial test is more sensitive.  
+
   
 	MANDATORY ARGUMENTS:
     -p,--prot     => (STRING) protein coding gff3 file; one of -p or -l is mandatory
@@ -217,6 +218,8 @@ Last update  :  Mar 31 2016
     -d,--dogaps   => (BOOL)   See above; use this and provide the genome fasta file if no gap file (-g)
                               If several files in -e, then the genome needs to be the first one.
                               This step is not optimized, it will take a while (but will create the required file)                       
+
+	OPTIONAL ARGUMENTS FOR BEDTOOLS SHUFFLING:
     -i,--incl     => (STRING) To use as -incl for bedtools shuffle: "coordinates in which features from -i should be placed."
                               Bed of gff format. Could be intervals close to transcripts for example.
                               More than one file (same format) may be provided (comma separated), 
@@ -224,6 +227,9 @@ Last update  :  Mar 31 2016
     -a,--add      => (BOOL)   to add the -noOverlapping option to the bedtools shuffle command line, 
                               and therefore NOT allow overlaps between the shuffled features.
                               This may create issues mostly if -i is used (space to shuffle into smaller than features to shuffle)
+    -w,--where    => (STRING) if BEDtools are not in your path, provide path to BEDtools bin directory
+
+	OPTIONAL ARGUMENTS FOR TE FILTERING:
     -u,--u        => (STRING) To set the behavior regarding non TE sequences: all, no_low, no_nonTE, none
                                  -t all = keep all non TE sequences (no filtering)
                                  -t no_low [default] = keep all besides low_complexity and simple_repeat
@@ -238,19 +244,27 @@ Last update  :  Mar 31 2016
     -c,--contain  => (BOOL)   to check if the "name" determined with -filter is included in the value in Repeat Masker output, instead of exact match
                               ex: -a name,HERVK -c => all fragments containing HERVK in their name
                                   -a family,hAT -c => all repeats with family containing hAT (...#DNA/hAT, ...#DNA/hAT-Charlie, etc)
-    -w,--where    => (STRING) if BEDtools are not in your path, provide path to BEDtools bin directory
+    -g,--group    => (STRING) provide a file with TE age: 
+                                 Rname  Rclass  Rfam  Rclass/Rfam  %div(avg)  lineage  age_category
+                              At least Rname and lineage are required (other columns can be \"na\"),
+                              and age_category can be empty. But if age_category has values, it will 
+                              be used as well. Typically:
+                                  TE1  LTR  ERVL-MaLR  LTR/ERVL-MaLR  24.6  Eutheria  Ancient
+                                  TE2  LTR  ERVL-MaLR  LTR/ERVL-MaLR   9.9  Primates  LineageSpe
+
+	OPTIONAL ARGUMENTS (GENERAL): 
     -v,--version  => (BOOL)   print the version
     -h,--help     => (BOOL)   print this usage
 
     
 TE-analysis_Shuffle_bed
 =====
-version 2.1
-Last update  :  Oct 24 2016
+version 3.0
+Last update  :  Oct 25 2016
 
-     perl $scriptname -f features.bed [-o <nt>] -s features_to_shuffle [-n <nb>] 
-             -r <genome.range> [-b] -e <genome.gaps> [-d] [-i <include.range>] [-a] [-w <bedtools_path>] 
-            [-l <if_nonTE>] [-t <filterTE>] [-c] [-g <TE,age,tab>] [-v] [-h]
+    perl TE-analysis_Shuffle_bed.pl -f features.bed [-o <nt>] -s features_to_shuffle [-n <nb>] -r <genome.range> [-b] 
+                                    -e <genome.gaps> [-d] [-i <include.range>] [-a] [-w <bedtools_path>] 
+                                   [-l <if_nonTE>] [-t <filterTE>] [-c] [-g <TE,age,tab>] [-v] [-h]
 
     /!\ REQUIRES: Bedtools, at least v18 (but I advise updating up to the last version)
     /!\ Previous outputs, if any, will be moved as *.previous [which means previous results are only saved once]

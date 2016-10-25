@@ -1,0 +1,31 @@
+Set-IntSpan-Fast version 1.15
+
+INSTALLATION
+
+To install this module, run the following commands:
+
+    perl Makefile.PL
+    make
+    make test
+    make install
+
+
+Alternatively, to install with Module::Build, you can use the following commands:
+
+    perl Build.PL
+    ./Build
+    ./Build test
+    ./Build install
+
+
+DEPENDENCIES
+
+    Data::Types
+    List::Util
+
+COPYRIGHT AND LICENCE
+
+Copyright (C) 2006, 2007, Andy Armstrong
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.

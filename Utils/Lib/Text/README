@@ -1,0 +1,39 @@
+Text::Table
+
+This module can be used to render plaintext/ASCII-art/Unicode-art tables.
+
+INSTALLATION
+
+To install this module, run the following commands:
+
+    perl Build.PL
+    ./Build
+    ./Build test
+    ./Build install
+
+Alternatively, you should use your favourite CPAN client or distribution's
+package manager.
+
+SUPPORT AND DOCUMENTATION
+
+After installing, you can find documentation for this module with the perldoc command.
+
+    perldoc Text::Table
+
+You can also look for information at:
+
+    MetaCPAN
+        http://metacpan.org/release/Text-Table
+
+    CPAN Request Tracker:
+        http://rt.cpan.org/NoAuth/Bugs.html?Dist=Text::Table
+
+    CPAN Ratings:
+        http://cpanratings.perl.org/d/Text::Table
+
+COPYRIGHT AND LICENCE
+
+Copyright (c) 2002-2011, Anno Siegel <siegel@zrz.tu-berlin.de>
+Copyright (c) 2011, Shlomi Fish <shlomif@shlomifish.org>
+
+This program is released under the following license: The ISC License.
