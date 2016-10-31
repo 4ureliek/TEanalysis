@@ -50,7 +50,7 @@ Synopsis (v$version):
 
     perl $scriptname -f features.bed [-o <nt>] -s features_to_shuffle [-n <nb>] 
              -r <genome.range> [-b] -e <genome.gaps> [-d] [-i <include.range>] [-a] [-w <bedtools_path>] 
-            [-l <if_nonTE>] [-t <filterTE>] [-c] [-g <TE,age,tab>] [-v] [-h]
+            [-l <if_nonTE>] [-t <filterTE>] [-c] [-g <TE.age.tab>] [-v] [-h]
 
     /!\\ REQUIRES: Bedtools, at least v18 (but I advise updating up to the last version)
     /!\\ Previous outputs, if any, will be moved as *.previous [which means previous results are only saved once]

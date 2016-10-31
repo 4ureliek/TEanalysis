@@ -318,7 +318,7 @@ print STDERR "     + getting genomic counts for each repeat\n" unless ($full eq 
 my ($toshuff_file,$parsedRM) = TEshuffle::RMtobed($shuffle,$okseq,$filter,$f_regexp,$nonTE,$age,$full);
 
 #Load the gff files
-print STDERR " --- Load gene IDs / transcript IDs for for:\n";
+print STDERR " --- Load gene IDs / transcript IDs for:\n";
 my $whichgene = ();
 my $l_tr = ();
 my $p_tr = ();
