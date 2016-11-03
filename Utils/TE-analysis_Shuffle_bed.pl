@@ -26,7 +26,7 @@ use TEshuffle;
 #flush buffer
 $| = 1;
 
-my $version = "3.0";
+my $version = "3.1";
 my $scriptname = "TE-analysis_Shuffle_bed.pl";
 my $changelog = "
 #	- v1.0 = Mar 2016 
@@ -43,6 +43,8 @@ my $changelog = "
 #            Changes in stats, bug fix; use R for the binomial test
 #	- v3.0 = Oct 25 2016
 #            TEshuffle.pm for subroutines shared with the shuffle_bed script
+#	- v3.1 = Nov 03 2016
+#            Bug fix - keys for age were being defined even when no age file
 \n";
 
 my $usage = "
@@ -388,6 +390,7 @@ sub check_for_overlap {
 		if ($age->{$Rnam}) {
 			unless ($check->{$l[9]}{'age'}) { #easier to load tot hit with these keys for the print_out sub
 				($counts->{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'})?($counts->{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'}++):($counts->{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'}=1); 
+				($counts->{$fileid}{'age'}{'cat.2'}{'tot'}{'tot'})?($counts->{$fileid}{'age'}{'cat.2'}{'tot'}{'tot'}++):($counts->{$fileid}{'age'}{'cat.2'}{'tot'}{'tot'}=1); 
 			}
 			unless ($check->{$l[9]}{$age->{$Rnam}[4]}) {
 				($counts->{$fileid}{'age'}{'cat.1'}{$age->{$Rnam}[4]}{'tot'})?($counts->{$fileid}{'age'}{'cat.1'}{$age->{$Rnam}[4]}{'tot'}++):($counts->{$fileid}{'age'}{'cat.1'}{$age->{$Rnam}[4]}{'tot'}=1);
@@ -401,7 +404,6 @@ sub check_for_overlap {
 		}
 	}
 	close ($fh);		
-	$counts->{$fileid}{'age'}{'cat.2'}{'tot'}{'tot'}=$counts->{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'};
 	#Now print stuff and exit
 #	print STDERR "     print details in files with name base = $out\n";	
 	print_out($counts,$fileid,$input_feat,$out);	
