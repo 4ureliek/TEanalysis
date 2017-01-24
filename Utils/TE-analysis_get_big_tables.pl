@@ -11,24 +11,25 @@ use strict;
 use Carp;
 use Getopt::Long;
 
-my $version = "1.0";
+my $version = "1.2";
 my $scriptname = "TE-analysis_get_big_tables.pl";
 my $changelog = "
 # Change log for $scriptname:
 #	v1.0 = 1 Apr 2016
+#	v1.1 = 16 Nov 2016
+#          --bed option
+#	v1.2 = 24 Jan 2017
+#          age was not a %, was missing the x 100
+#          the pipeline does not get frequency for bed files => do that here as a quick fix
 \n";
 
 my $usage = "\nUsage [$version]: 
-    perl $scriptname -d directory [-chlog] [-h] [-help]
+    perl $scriptname -d directory [-b] [-chlog] [-h] [-help]
    
     SYNOPSIS
      Util for TE-analysis_pipeline.pl (https://github.com/4ureliek/TEanalysis)
      Use to merge results of several runs: will print tables that will 
      facilitate plotting / compararisons 
-    
-    REQUIREMENTS
-     - R installed on the computer / server
-     - perl module Statistics::R
     
     CITATION
      - For the use of this script, you may cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
@@ -37,12 +38,15 @@ my $usage = "\nUsage [$version]:
     MANDATORY ARGUMENTS:
      -d,--dir     => (STRING) directory with a bunch of the outputs from TE-analysis_pipeline.pl
                               Will be processed:
-                                *_Summary.tab
+                                *_Summary.tab [unless -b is set since not generated]
                                 *.concat.CAT-class.tab
                                 *.concat.CAT.tab
                                 *.concat.AGE.tab (if any)
-
+	
     OPTIONAL ARGUMENTS:
+     -b,--bed     => (BOOL)   if -f bed was used the TEanalysis pipeline, with -dir
+                              then use this to concatenate outputs for different samples
+                              and process them to make big tables
      -c,--chlog   => (BOOL)   print log of changes
      -v,--version => (BOOL)   print the version
      -h,--help    => (BOOL)   print this usage
@@ -52,9 +56,10 @@ my $usage = "\nUsage [$version]:
 #------------------------------ LOAD AND CHECK -------------------------------
 #-----------------------------------------------------------------------------
 
-my ($dir,$chlog,$v,$help);
+my ($dir,$bed,$chlog,$v,$help);
 my $opt_success = GetOptions(
 			 	  'dir=s'		=> \$dir,
+			 	  'bed'         => \$bed,
 			 	  'chlog'       => \$chlog,
 			 	  'version'     => \$v,
 			 	  'help'		=> \$help,);
@@ -65,7 +70,7 @@ die $changelog if $chlog;
 die $usage if $help || ! $opt_success;
 die $usage unless ($dir);
 die "\n -d $dir does not exist?\n\n"  if (! -e $dir);
-
+$dir =~ s/\/$// if ($dir =~ /\/$/); #remove the / at the end of directory if any
 
 #-----------------------------------------------------------------------------
 #----------------------------------- MAIN ------------------------------------
@@ -73,26 +78,28 @@ die "\n -d $dir does not exist?\n\n"  if (! -e $dir);
 print STDERR "\n --- $scriptname v$version\n";
 
 #Loading any summary files
-print STDERR " --- Loading *._Summary.tab files\n";
-my $summary = load_summary($dir);
+print STDERR " --- Loading *._Summary.tab files\n" unless ($bed);
+my $summary = load_summary($dir) unless ($bed); #no summary files when -f bed
 
 #Loading any CAT-class files
 print STDERR " --- Loading *.concat.CAT-class.tab files\n";
+`cat $dir/*.CAT-class.tab > $dir/_concat.CAT-class.tab` if (($bed) && (! -e "$dir/_concat.CAT-class.tab"));
 my @files = `ls $dir | grep "concat.CAT-class.tab"`;
 my $class = load_cat($dir,\@files);
 
 #Loading any CAT files
 print STDERR " --- Loading *.concat.CAT.tab files\n";
+`cat $dir/*.CAT.tab > $dir/_concat.CAT.tab` if (($bed) && (! -e "$dir/_concat.CAT.tab"));
 @files = `ls $dir | grep "concat.CAT.tab"`;
 my $cat = load_cat($dir,\@files); #same sub works, even if it will fo the totlen 2 times
 
 #Loading any AGE files
 print STDERR " --- Loading *.concat.AGE.tab files (if any)\n";
-my ($age,$totlen) = load_age($dir);
+my ($age,$totlen) = load_age($dir,$bed); #here, send the $bed to the sub
 
 #Print data now
 print STDERR " --- Print data in tables\n";
-my $out = print_plots($dir,$summary,$class,$cat,$age,$totlen);
+my $out = print_tables($dir,$summary,$class,$cat,$age,$totlen,$bed);
 
 print STDERR " --- $scriptname done\n";
 print STDERR "      => $out\n\n";
@@ -171,7 +178,7 @@ sub load_cat{
     		next LINE if ($l !~ /\w/);  
     		my @l = split(/\s+/,$l);    		
     		#First line of a new file:
-    		($fname,$type) = get_name_type($l[1]) if ($l[0] eq "#file:"); 	
+    		($fname,$type) = get_name_type($l[1],$bed) if ($l[0] eq "#file:");
     		next LINE if ($l[0] eq "#file:");
     		#Get the full type for the up and dw, but also add 0s
     		if ($l[0] eq "cut:") {
@@ -214,8 +221,9 @@ sub load_cat{
 # my ($fname,$type) = get_name_type($l[1]) if ($l[0] eq "#file:");
 #-----------------------------------------------------------------------------
 sub get_name_type { 
-	my $name = shift;    
+	my ($name,$bed) = @_;    
     my ($fname,$type) = ("nd","nd");
+    return (filename($name),"") if ($bed);
     ($fname,$type) = ($1,"02.exons") if ($name =~ /^(.*)\.exons$/);  
     ($fname,$type) = ($1,"04.introns") if ($name =~ /^(.*)\.introns\..+?$/);  
     ($fname,$type) = ($1,"01.up") if ($name =~ /^(.*)\.up\..+?\.corr$/);  
@@ -230,7 +238,8 @@ sub get_name_type {
 # my ($age,$totlen) = load_age($dir);
 #-----------------------------------------------------------------------------
 sub load_age { 
-    my ($dir) = @_;   
+    my ($dir,$bed) = @_;   
+    `cat $dir/*.AGE.tab > $dir/_concat.AGE.tab` if (($bed) && (! -e "$dir/_concat.AGE.tab"));
     my @files = `ls $dir | grep "concat.AGE.tab"`;
     return "na" unless ($files[0]);
     my $age = ();
@@ -243,7 +252,8 @@ sub load_age {
     		chomp(my $l = $_);
     		my @l = split(/\s+/,$l);
     		next LINE if ($l !~ /\w/); 
-    		($fname,$type) = get_name_type($l[1]) if ($l[0] eq "#file:");
+    		($fname,$type) = get_name_type($l[1],$bed) if ($l[0] eq "#file:");
+    		$type = "all" if (($bed) && ($type eq ""));
     		$totlen->{$fname}{$type} = $l[1] if ($l[0] eq "#total_length(nt):");
     		next LINE if (substr($l,0,1) eq "#");   
     		$l[0] = "01_Mus/rat" if ($l[0] eq "01_Mus/Rat");		
@@ -286,26 +296,30 @@ sub load_age {
 
 #-----------------------------------------------------------------------------
 # Now print stuff in a way that will make it easy to plot
-# print_plots($dir,$summary,$class,$cat,$age,$totlen);
+# print_plots($dir,$summary,$class,$cat,$age,$totlen,$bed);
 #-----------------------------------------------------------------------------
-sub print_plots {
-	my ($dir,$summary,$class,$cat,$age,$totlen) = @_;
+sub print_tables {
+	my ($dir,$summary,$class,$cat,$age,$totlen,$bed) = @_;
 	$dir = $1 if $dir =~ /(.*)\/$/;
+	$dir = "_" if ($dir eq "."); #if current dir, would make a ..tab file
 	my $out = $dir.".tab";
-	open(my $fh, ">",$out) or confess "\n   ERROR (sub RMtobed): could not open to write $out $!\n";
+	open(my $fh, ">",$out) or confess "\n   ERROR (sub print_tables): could not open to write $out $!\n";
 	
 	#I. SUMMARY
 	print $fh "#I. Summary:\n";
-	print $fh "#File\tinput_type(if_any)\tCategory\tsubset\t%(nr)\tin_TE(nr)\tTotal_In_Set(nr)\n";
-	foreach my $cat (keys %{$summary}) {
-		foreach my $in_type (keys %{$summary->{$cat}}) {
-			foreach my $file (keys %{$summary->{$cat}{$in_type}}) {
-				my ($fname,$subset) = get_subset($file);
-				print $fh "$fname\t$in_type\t$cat\t$subset\t$summary->{$cat}{$in_type}{$file}{'nr_per'}\t$summary->{$cat}{$in_type}{$file}{'in_TEs'}\t$summary->{$cat}{$in_type}{$file}{'in_set'}\n";
+	unless ($bed) {
+		print $fh "#File\tinput_type(if_any)\tCategory\tsubset\t%(nr)\tin_TE(nr)\tTotal_In_Set(nr)\n";
+		foreach my $cat (keys %{$summary}) {
+			foreach my $in_type (keys %{$summary->{$cat}}) {
+				foreach my $file (keys %{$summary->{$cat}{$in_type}}) {
+					my ($fname,$subset) = get_subset($file);
+					print $fh "$fname\t$in_type\t$cat\t$subset\t$summary->{$cat}{$in_type}{$file}{'nr_per'}\t$summary->{$cat}{$in_type}{$file}{'in_TEs'}\t$summary->{$cat}{$in_type}{$file}{'in_set'}\n";
+				}	
 			}	
-		}	
+		}
+	} else {
+		print $fh "#NA\n";
 	}
-	
 	#II. CAT CLASSES
 	print $fh "\n#II. Repeat classes:\n";
 	print $fh "#File\tcategory\tsubset\ttype\t";
@@ -321,12 +335,9 @@ sub print_plots {
 	}
 	print $fh "\n";	
 	foreach my $cat (keys %{$class}) {
-		foreach my $file (keys %{$class->{$cat}}) {
-		
-#			print STDERR "Looping in class hash: $file\n";
-		
+		foreach my $file (keys %{$class->{$cat}}) {		
 			foreach my $type (sort keys %{$class->{$cat}{$file}}) {	
-				my ($fname,$subset) = get_subset($file);
+				my ($fname,$subset) = get_subset($file,$bed);				
 				print $fh "$fname\t$cat\t$subset\t$type\t";	
 				foreach my $Rclass (keys %{$class->{$cat}{$file}{$type}}) {
 					print $fh "$class->{$cat}{$file}{$type}{$Rclass}\t";
@@ -352,7 +363,7 @@ sub print_plots {
 	print $fh "\n";
 	foreach my $file (sort keys %{$age}) {	
 		TYPE: foreach my $type (keys %{$age->{$file}}) {
-			my ($fname,$subset) = get_subset($file);
+			my ($fname,$subset) = get_subset($file,$bed);			
 			next TYPE if (($fname =~ /\.nc$/) && (($type eq "02.CDS") || ($type eq "02.UTR")));
 			next TYPE if (($fname =~ /\.pc$/) && ($type eq "02.exons"));
 			next TYPE if (($fname =~ /\.pc\.all/) && ($type ne "04.introns") && ($subset eq "all.CDS"));
@@ -360,7 +371,7 @@ sub print_plots {
 			print $fh "$fname\t$subset\t$type\t";
 			foreach my $agecat (sort keys %{$age->{$file}{$type}}) {				
 				my $per = "na";
-				$per = $age->{$file}{$type}{$agecat}/$totlen->{$file}{$type} if ($totlen->{$file}{$type});
+				$per = $age->{$file}{$type}{$agecat}/$totlen->{$file}{$type} *100 if ($totlen->{$file}{$type});
 				print $fh "$per\t";
 			}
 			print $fh "\n";
@@ -446,10 +457,11 @@ sub populate_down3 {
 
 #-----------------------------------------------------------------------------
 # get subset = filter, parsed, from TE analysis pipeline
-# my ($fname,$subset) = get_subset($file);
+# my ($fname,$subset) = get_subset($file,$bed);
 #-----------------------------------------------------------------------------
 sub get_subset {
-	my $file = shift;
+	my ($file,$bed) = @_;
+	return($file,"na") if ($bed);
 	my @file = split(/\./,$file);
 	my $parsed = pop(@file);
 	my $filter = pop(@file);

@@ -25,7 +25,7 @@ use Getopt::Long;
 select((select(STDERR), $|=1)[0]); #make STDERR buffer flush immediately
 select((select(STDOUT), $|=1)[0]); #make STDOUT buffer flush immediately
 
-my $version = "4.7";
+my $version = "4.9";
 my $changelog = "
 #	v1.0 = Mar 2013
 #      [...]
@@ -62,7 +62,10 @@ my $changelog = "
 #          - update to read properly recent Gencode gff3
 #   v4.8 = 04 Oct 2016
 #          - update usage and help
-
+#   v4.9 = 09 Jan 2017
+#          - bug fix in the intersection calculation. Fix it, but also change to use the -wo instead
+#   v4.10 = 25 Jan 2017
+#          - Add count of features from the bed file in summary file
 
 # TO DO: 
 #  - Do a utils script to integrate data from several runs as summary or TEratios, like the Coverage one, but with mosaic plots
@@ -528,11 +531,14 @@ foreach my $in (@listin) {
 
 	#Parse the joined files with TEs
 	#####################################################
+	my $feat_nb = `wc -l $in`;
+	$feat_nb =~ s/^([0-9]+?)\s+.*$/$1/;
+	$feat->{'all'}{'all'}{$in}=$feat_nb; #save number of features by file for bed ft
 	my $totlen = get_amounts($listtojoin,$name,$addn,$TrInfos,$cut,$ft,$v); #using files before joining
 	my $countTE = parse_join($listtoanalyse,$TrInfos,$ExInfo,$TEinfoRMP,$TE_RMP,$TEinfo,$TEage,$addcol,$cut,$totlen,$TEov,$ft,$v);
 
 	#Summary file
-	summary($in,$countTE,$feat,$addn,$v) if ($ft eq "gtf");	
+	summary($in,$countTE,$feat,$addn,$ft,$v);	
 }
 #30 subs later - Done!
 print STDERR   "\n --- Script for TE analysis is done\n" if ($v);
@@ -1632,7 +1638,7 @@ sub TE_join {
 		my $out = "$listtojoin[$i].TEjoin.bed";
 		push(@listtoanalyse,$out);
 		unless (-e $out) {
-			($bedtools eq "na")?(system "intersectBed -a $RMoutbed -b $listtojoin[$i].bed -wa -wb > $out"):(system "$bedtools/intersectBed -a $RMoutbed -b $listtojoin[$i].bed -wa -wb > $out");
+			($bedtools eq "na")?(system "intersectBed -a $RMoutbed -b $listtojoin[$i].bed -wo > $out"):(system "$bedtools/intersectBed -a $RMoutbed -b $listtojoin[$i].bed -wo > $out");
 		} else {
 			print STDERR "          $out already exists, skipping...\n" if ($v);
 		}
@@ -1751,7 +1757,8 @@ sub parse_join {
 		
 		#0) Deal with simple bed file
 		if ($ft eq "bed") {
-			my $TEcat = loop_join_simple($join,$TEinfoRMP,$TEinfo,$TEage,$TEov,$v);
+			my $TEcat = ();	
+			($countTE,$TEcat) = loop_join_simple($join,$TEinfoRMP,$TEinfo,$TEage,$countTE,$TEov,$v);
 			print_OUT($file,$TEcat,$TEinfo,$TEinfoRMP,$TE_RMP,$TEage,$totlen,"all",$v);		
 		#1) Deal with all exon/intron stuff
 		} elsif (($file =~ /\.exons/) || ($file =~ /\.CDS/) || ($file =~ /\.UTR/) || ($file =~ /\.introns\./)) {		
@@ -1785,7 +1792,7 @@ sub parse_join {
 }
 
 #----------------------------------------------------------------------------
-# Load the join file in a table + filter if intersection is < 9nt
+# Load the join file in a table + filter if intersection is < 10nt
 # my $join = load_join($file,$TEov,$v);
 # called by parse_join
 # TO DO: implement a filter on TE name, class or family.
@@ -1798,26 +1805,34 @@ sub load_join {
 	LINE: while (<$fh>) {
 		chomp(my $l = $_);
 		my @l = split('\s+', $l);
-		my $startBASE1 = $l[1];
-		my @RMout = split(';', $l[3]);
-		$RMout[5] = $startBASE1;
-		@l = @l[4..$#l];
-		unshift(@l,@RMout);
-		my ($Istart,$Iend,$Ilen);
-		my ($Gst,$Gen,$st,$en) = ($l[5],$l[6],$l[18],$l[19]);
-		#Get intersection coordinates
-		($Gst < $st)?($Istart = $Gst):($Istart = $st);
-		($Gen < $en)?($Iend = $Gen):($Iend = $en);
-		$Ilen = $Iend-$Istart+1; 
-		#filter if < TEov		
+		my $Ilen = $l[-1]; #last value of the line is intersection length, -wo from Bedtools
+		
+		#filter if < TEov	
 		if (substr($TEov,-1) eq "%") {
+			my ($st,$en) = ($l[18],$l[19]);
 			my $Plen = $Ilen/($en-$st+1)*100;
 			my $TEovP = substr($TEov,0,-1); #should remove the last %
 			next LINE if ($Plen<$TEovP);
 		} elsif (substr($TEov,-1) ne "%") {
 			next LINE if ($Ilen<$TEov);
 		}
-		#if OK, push line in table
+		
+		#Correct @l
+		my $startBASE1 = $l[1];
+		my @RMout = split(';', $l[3]);
+		$RMout[5] = $startBASE1; #correction of the start in case it was base 0
+		@l = @l[4..$#l];
+		unshift(@l,@RMout);
+		
+#deprecated now that -wo in intersectBed has the intersection length; if uncommented, the "#filter if < TEov" need to be moved after this
+# 		my ($Istart,$Iend,$Ilen);
+# 		my ($Gst,$Gen,$st,$en) = ($l[5],$l[6],$l[18],$l[19]);
+# 		#Get intersection coordinates
+# 		($Gst > $st)?($Istart = $Gst):($Istart = $st);
+# 		($Gen < $en)?($Iend = $Gen):($Iend = $en);
+# 		$Ilen = $Iend-$Istart+1; 
+		
+		#push in table
 		push @join, \@l;
 	}
 	close ($fh);
@@ -2075,28 +2090,31 @@ sub get_TE_contrib {
 
 #----------------------------------------------------------------------------
 # Loop join simple - get values
-# my $TEcat = loop_join_simple($join,$TEinfoRMP,$TEinfo,$TEage,$TEov,$v);
+# my ($countTE,$TEcat) = loop_join_simple($join,$TEinfoRMP,$TEinfo,$TEage,$countTE,$TEov,$v);
 # called by parse_join
 #----------------------------------------------------------------------------			
 sub loop_join_simple {		
-	my ($join,$TEinfoRMP,$TEinfo,$TEage,$TEov,$v) = @_;
+	my ($join,$TEinfoRMP,$TEinfo,$TEage,$countTE,$TEov,$v) = @_;
 	my @join = @{$join};
 	my $TEcat = (); 
 	my $p = ();
 	my %countchr = ();
+#NB structure of countTE = $countTE->{'tr'}{$tr_type}{$Tr_ID_full}=1;
 	LINE: for (my $i = 0; $i <= $#join; $i++){
 		#current line:
-		my ($Gname,$Gstart,$Gend,$Rstrand,$Rname,$RclassFam,$block) = ($join->[$i][4],$join->[$i][5],$join->[$i][6],$join->[$i][8],$join->[$i][9],$join->[$i][10],$join->[$i][14]);
+		my ($Gname,$Gstart,$Gend,$Rstrand,$Rname,$RclassFam,$block,$Ilen) = ($join->[$i][4],$join->[$i][5],$join->[$i][6],$join->[$i][8],$join->[$i][9],$join->[$i][10],$join->[$i][14],$join->[$i][-1]); #last column is now overlap
 		my $Glen = $Gend - $Gstart + 1;
 		my ($Rclass, $Rfam) = split ("/",$RclassFam);
 		my ($st,$en,$ID,$strand) = ($join->[$i][18],$join->[$i][19],$join->[$i][20],$join->[$i][22]);
 		my $Exlen = $en - $st +1; 
 
-		#get TE contribution to feature + count stuff
+		#get the intersection start and end
 		my ($Istart,$Iend);
 		($Gstart > $st)?($Istart = $Gstart):($Istart = $st);
 		($Gend < $en)?($Iend = $Gend):($Iend = $en);
-		my $Ilen = $Iend - $Istart +1;
+		
+		#also count number of features that have an overlap
+		$countTE->{'all'}{'all'}{$ID}=1;
 		
 		#get TE lineage info if relevant
 		my ($age1,$age2,$div) = get_TE_age_info($TEinfoRMP,$TEinfo,$TEage,$Rname);
@@ -2136,7 +2154,7 @@ sub loop_join_simple {
 		($TEcat->{'chr'}{$Rfullname})?($TEcat->{'chr'}{$Rfullname}+=1):($TEcat->{'chr'}{$Rfullname}=1) unless ($countchr{$Rfullname}{$Gname});
 		$countchr{$Rfullname}{$Gname}=1;
 	}
-	return($TEcat);		
+	return($countTE,$TEcat);		
 }	
 
 #----------------------------------------------------------------------------
@@ -2445,16 +2463,16 @@ sub get_cat_nb {
 
 #----------------------------------------------------------------------------
 # Print summary file
-# summary($in,$countTE,$feat,$addn,$v);
-# called by parse_join/print_OUT
+# summary($in,$countTE,$feat,$addn,$ft,$v);
+# called by main
 #----------------------------------------------------------------------------
 sub summary {
-	my ($in,$countTE,$feat,$addn,$v) = @_;
+	my ($in,$countTE,$feat,$addn,$ft,$v) = @_;
 	$in =~ s/(.*)\.gtf/$1/;
 	print STDERR "\n --- Printing summary file and concatenating other outputs\n" if ($v);
 	my $s = $in.".".$addn."_Summary.tab";
 	print STDERR "      - $s\n" if ($v);	
-	open(my $fh, ">", $s) or confess "\n   ERROR (sub parse_join/print_OUT): could not open to write $s $!\n";	
+	open(my $fh, ">", $s) or confess "\n   ERROR (sub summary): could not open to write $s $!\n";	
 	print $fh "#SUMMARY NUMBERS FOR $in\n";
 
 	#get numbers of TSS polyA - for each transcript type
@@ -2463,14 +2481,16 @@ sub summary {
 # 	$feat->{'tr'}{$tr_type}{$tr_id_full}=1 #keys = nb of transcripts [for each transcript type]
 # 	$featC->{'3SPL'}{$tr_type}{$SPL3}=1 if ($SPL3 ne "na");
 # 	$featC->{'5SPL'}{$tr_type}{$SPL5}=1 if ($SPL5 ne "na");
+#	$feat->{'all'}{'all'}{$in}=1 #WHEN BED FORMAT
 	my %tot = ();
 	foreach my $id (sort keys %{$feat}) {
 		foreach my $tr_type (sort keys %{$feat->{$id}}) { 
 			foreach my $id2 (sort keys %{$feat->{$id}{$tr_type}}) { 
-				$tot{$id}{$tr_type}++;
+				$tot{$id}{$tr_type}+=$feat->{$id}{$tr_type}{$id2}; #when bed format it will simply count total number of features
 			}
 		}
 	}
+
 # 	$countTE->{'TSS'}{$tr_type}{$TSS}=1 if ($cat =~ /TSS/);
 # 	$countTE->{'polyA'}{$tr_type}{$polyA}=1 if ($cat =~ /polyA/);
 # 	$countTE->{'3SPL'}{$tr_type}{$SPL3}=1 if ($cat =~ /3SPL/);
@@ -2495,13 +2515,15 @@ sub summary {
 	}	
 	close $fh;	
 
-	#cat other outputs for easier access	
-	`rm -Rf $in.$addn.concat.CAT.tab` if (-e "$in.$addn.concat.CAT.tab");
-	`cat $in.*.CAT.tab > $in.$addn.concat.CAT.tab`;
-	`rm -Rf $in.$addn.concat.CAT-class.tab` if (-e "$in.$addn.concat.CAT.tab");
-	`cat $in.*.CAT-class.tab > $in.$addn.concat.CAT-class.tab`;
-	`rm -Rf $in.$addn.concat.AGE.tab` if (-e "$in.$addn.concat.AGE.tab");
-	`cat $in.*.AGE.tab > $in.$addn.concat.AGE.tab` if ($TEage ne "na");
+	#cat other outputs for easier access when $ft eq gtf
+	if ($ft eq "gtf") {
+		`rm -Rf $in.$addn.concat.CAT.tab` if (-e "$in.$addn.concat.CAT.tab");
+		`cat $in.*.CAT.tab > $in.$addn.concat.CAT.tab`;
+		`rm -Rf $in.$addn.concat.CAT-class.tab` if (-e "$in.$addn.concat.CAT.tab");
+		`cat $in.*.CAT-class.tab > $in.$addn.concat.CAT-class.tab`;
+		`rm -Rf $in.$addn.concat.AGE.tab` if (-e "$in.$addn.concat.AGE.tab");
+		`cat $in.*.AGE.tab > $in.$addn.concat.AGE.tab` if ($TEage ne "na");
+	}
 	return;
 }
 
