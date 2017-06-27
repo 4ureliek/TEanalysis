@@ -5,7 +5,20 @@
 # => defined as TEshuffle package
 ######################################################
 package TEshuffle;
+use Data::Dumper;
+use strict;
+use warnings;
 use Carp;
+
+#----------------------------------------------------------------------------
+# get a filename from a full path
+# my $genone_name = DelGet::filename($genone);
+#----------------------------------------------------------------------------
+sub filename {
+	my($name) = shift;
+	$name =~ s/.*\/(.*)$/$1/;
+	return $name;
+}
 
 #-----------------------------------------------------------------------------
 # Get build if needed and get chromosomes included in it
@@ -156,21 +169,28 @@ sub load_TEage {
 
 #-----------------------------------------------------------------------------
 # Convert RMoutput .out file to bed if needed
-# my ($toshuff_file,$parsedRM) = TEshuffle::RMtobed($shuffle,$okseq,$filter,$f_regexp,$nonTE,$age,"y");
+# my ($toshuff_file,$parsedRM,$rm,$rm_c) = TEshuffle::RMtobed($shuffle,$okseq,$filter,$f_regexp,$nonTE,$age,"y",$stype);
 # my ($toshuff_file,$parsedRM) = TEshuffle::RMtobed($shuffle,$okseq,$filter,$f_regexp,$nonTE,$age,$full);
 #-----------------------------------------------------------------------------
 sub RMtobed {
-	my ($file,$okseq,$filter,$f_regexp,$nonTE,$age,$full) = @_;
+	my ($file,$okseq,$filter,$f_regexp,$nonTE,$age,$full,$stype) = @_;
 	my $parsed = ();
+	my $rm = ();
+	my $rm_c = ();
 	my ($f_type,$f_name) = split(",",$filter) unless ($filter eq "na");	
 	my $ok = $file;
 	$ok = $1 if ($file =~ /(.*)\.out$/);	
-	$ok = $1 if ($file =~ /(.*)\.bed$/);	
-	($filter eq "na")?($ok = $ok.".nonTE-$nonTE.bed"):($ok = $ok.".$f_name.bed");		
+	$ok = $1 if ($file =~ /(.*)\.bed$/);
+	if ($filter eq "na") {
+		$ok = $ok.".nonTE-$nonTE" unless ($ok =~ /nonTE-$nonTE/);
+	} else {
+		$ok = $ok.".$f_name";
+	}	
+	$ok = $ok.".bed";
 	if (-e $ok) { #if has been filtered same way, OK, just get dictionary
 		print STDERR "     -> $ok exists, just getting dictionary from it\n";
-		$parsed = getparsedRM($ok,$parsed,"file",$age);
-		return ($ok,$parsed);
+		($parsed,$rm,$rm_c) = getparsedRM($ok,$parsed,"file",$age,$rm,$rm_c,$stype);
+		return ($ok,$parsed,$rm,$rm_c);
 	}
 	print STDERR "     -> $file is in bed format, but $ok does not exist; generating it...\n" if ($file =~ /(.*)\.bed$/);
 	#now it means RM.out, or that the proper bed file does not exist => make it a bed file + load the parsing hash	
@@ -184,12 +204,12 @@ sub RMtobed {
 			$l =~ s/^\s+//;
 			next LINE if (($l =~ /^[Ss]core|^SW|^#/) || ($l !~ /\w/));
 			$l = $1 if ($l =~ /^(.*)\*$/); #remove the star
-			@l = split('\s+',$l);			
+			@l = split('\s+',$l);
 		} else { #if .bed file
 			my @all = split('\s+',$l);
 			@l = split(";",$all[3]);
 		}	
-		next LINE unless (defined $okseq->{$l[4]}); #if not in build of stuff OK to shuffle on, remove here as well
+		next LINE if (($stype eq "bed") && (! $okseq->{$l[4]})); #if not in build of stuff OK to shuffle on when stype = bed, remove here as well
 		$l[8] =~ s/C/-/; #correct strand to match convention
 		($Rname,$classfam) = ($l[9],$l[10]);	
 		my ($Rclass,$Rfam) = get_Rclass_Rfam($Rname,$classfam);
@@ -228,22 +248,23 @@ sub RMtobed {
 		print $bed_fh "$chr\t$start\t$end\t$ID\t.\t$strand\n"; #with ID being the whole line => easy to acces to RMoutput original info
 		
 		#get dictionary
-		$parsed = getparsedRM(\@l,$parsed,"line",$age) unless ($full eq "n");
+		($parsed,$rm,$rm_c) = getparsedRM(\@l,$parsed,"line",$age,$rm,$rm_c,$stype) unless ($full eq "n");
+	
 	}
 	close ($fh);
-	close ($bed_fh);
-	return ($ok,$parsed);
+	close ($bed_fh);	
+	return ($ok,$parsed,$rm,$rm_c);
 }
 
 #-----------------------------------------------------------------------------
 # Get infos from RMout
-# $parsed = getparsedRM($file,$parsed,"file",$age);
-# $parsed = getparsedRM(\@l,$parsed,"line",$age);
+# ($parsed,$rm,$rm_c) = getparsedRM($ok,$parsed,"file",$age,$rm,$rm_c,$stype);
+# ($parsed,$rm,$rm_c) = getparsedRM(\@l,$parsed,"line",$age,$rm,$rm_c,$stype);
 #-----------------------------------------------------------------------------
 sub getparsedRM {
-	my ($info,$parsed,$type,$age) = @_;
+	my ($info,$parsed,$type,$age,$rm,$rm_c,$stype) = @_;
 	if ($type eq "line") { #meaning it's read from the .out while being converted in .bed
-		$parsed = getparsedRMline($parsed,$info,$age);
+		($parsed,$rm,$rm_c) = getparsedRMline($parsed,$info,$age,$rm,$rm_c,$stype);
 	} else { #meaning it's already a bed file => open and read it
 		open(my $fh, "<$info") or confess "\n   ERROR (sub getparsedRM): could not open to read $info!\n";
 		LINE: while(<$fh>) {
@@ -252,20 +273,20 @@ sub getparsedRM {
 			next LINE if (($l =~ /^[Ss]core|^SW|^#/) || ($l !~ /\w/));
 			my @l = split('\s+',$l);
 			my @RMline = split(";",$l[3]);
-			$parsed = getparsedRMline($parsed,\@RMline,$age);
+			($parsed,$rm,$rm_c) = getparsedRMline($parsed,\@RMline,$age,$rm,$rm_c,$stype);
 		}
 		close $fh;	
 	}
-	return($parsed);
+	return ($parsed,$rm,$rm_c);
 }
 
 #-----------------------------------------------------------------------------
 # Get counts and length for each TE
-# $parsed = getparsedRMline($parsed,$info,$age)
-# $parsed = getparsedRMline($parsed,\@RMline,$age)
+# ($parsed,$rm,$rm_c) = getparsedRMline($parsed,$info,$age,$rm,$rm_c,$stype)
+# ($parsed,$rm,$rm_c) = getparsedRMline($parsed,\@RMline,$age,$rm,$rm_c,$stype)
 #-----------------------------------------------------------------------------
 sub getparsedRMline {
-	my ($parsed,$l,$age) = @_;
+	my ($parsed,$l,$age,$rm,$rm_c,$stype) = @_;
 	my ($Rname,$classfam) = ($l->[9],$l->[10]);
 	my ($Rclass,$Rfam) = get_Rclass_Rfam($Rname,$classfam);
 	#now feed dictionary
@@ -278,25 +299,215 @@ sub getparsedRMline {
 		($parsed->{'age'}{'cat.1'}{'tot'})?($parsed->{'age'}{'cat.1'}{'tot'}++):($parsed->{'age'}{'cat.1'}{'tot'}=1);
 		($parsed->{'age'}{'cat.1'}{$age->{$Rname}[4]})?($parsed->{'age'}{'cat.1'}{$age->{$Rname}[4]}++):($parsed->{'age'}{'cat.1'}{$age->{$Rname}[4]}=1);
 		($parsed->{'age'}{'cat.2'}{$age->{$Rname}[5]})?($parsed->{'age'}{'cat.2'}{$age->{$Rname}[5]}++):($parsed->{'age'}{'cat.2'}{$age->{$Rname}[5]}=1);	
-	}	
-	$parsed->{'age'}{'cat.2'}{'tot'}=$parsed->{'age'}{'cat.1'}{'tot'};
-	return $parsed;
+		#cat2 tot = cat1 tot:
+		$parsed->{'age'}{'cat.2'}{'tot'}=$parsed->{'age'}{'cat.1'}{'tot'};
+	}
+	#Load arrays to shuffle the TEs inside RMout, if $stype is rm
+	if ($stype eq "rm") {
+		my $middle = $l->[5] + int(($l->[6] - $l->[5]) / 2 + 0.5);
+		push(@{$rm_c->{$l->[4]}},$middle); #=> I can shuffle this, and then associate these coordinates with the other one => reconstruct a bed file, sort and then and intersect	
+		push(@{$rm->{$l->[4]}},$l); #to keep all infos
+	}
+	return ($parsed,$rm,$rm_c);
+}
+
+#-----------------------------------------------------------------------------
+# Load TSS from annotation gtf or gff
+# ($tss,$alltss) = load_and_print_tss($tssfile);
+#-----------------------------------------------------------------------------
+sub load_and_print_tss {
+	my $file = shift;
+	my $tssbed = $file;
+	$tssbed = $1 if ($file =~ /^(.*)\.(gtf|gff|gff3)$/);
+	$tssbed = $tssbed.".tss";
+	print STDERR "     $tssbed exists, skipping printing and load only\n" if (-e $tssbed);	
+	my $alltss = load_all_tss($tssbed) if (-e $tssbed);	
+	return ($tssbed,$alltss) if (-e $tssbed);	
+	my $i = 0;
+	my %alltss = ();
+	open (my $in, '<', $file) or confess "ERROR (sub print_tss): can't open to read $file $!\n";
+	open (my $out, '>', $tssbed) or confess "ERROR (sub print_tss): can't open to write $tssbed $!\n";
+	LINE: while (<$in>) {
+		chomp(my $l = $_);
+		next LINE if (substr($l,0,1) eq "#");
+		my @l = split(/\t/,$l);		 
+		next LINE unless ($l[2] =~ /transcript/); #could be "processed transcript"...?
+		my $trst;
+		($l[6] eq "+")?($trst=$l[3]):($trst=$l[4]);
+		my $st=$trst-1;
+		my $en=$trst+1;
+		my $tssid = "tss_".$i;
+		$l[0] = "chr".$l[0] if ($l[0]=~/^[0-9]|^[MXYZW]$|^MT$/); #ensembl gtf only has chr number
+		print $out "$l[0]\t$st\t$en\t$tssid\t$l[6]\n"; #may as well keep strand info
+		$i++;		
+		#Load the TSS in hash as well
+		my @tss = ($trst,$l[6]);
+		push(@{$alltss{$l[0]}},\@tss);
+	}
+	close $in;
+	close $out;
+	return ($tssbed,\%alltss);
+}
+
+#-----------------------------------------------------------------------------
+# Load all TSS
+# my $alltss = load_all_tss($tssbed);
+#-----------------------------------------------------------------------------
+sub load_all_tss {
+	my $tssbed = shift;
+	my %alltss = ();
+	open(my $fh, "<$tssbed") or confess "\n   ERROR (sub load_all_tss): could not open to read $tssbed $!\n";
+	LINE: while(<$fh>) {
+		chomp(my $l = $_);
+		my @l = split('\s+',$l);
+		#chr1	3073252	3073254	tss_0	+
+		my @tss = ($l[1]+1,$l[4]);
+		push(@{$alltss{$l[0]}},\@tss);
+	}
+	return (\%alltss);
+}
+
+#-----------------------------------------------------------------------------
+# Load distance to closes
+# $closest = TEshuffle::load_closest_tss($tssclosest);
+#-----------------------------------------------------------------------------
+sub load_closest_tss {
+	my $tssclosest = shift;
+	my %closest = ();
+	open(my $fh, "<$tssclosest") or confess "\n   ERROR (sub load_closest_tss): could not open to read $tssclosest $!\n";
+	LINE: while(<$fh>) {
+		chomp(my $l = $_);
+		my @l = split('\s+',$l);
+		#chr19	3000005	3000195	470;23.0;4.5;2.7;chr19;3000005;3000195;(58431371);+;IAPLTR3-int;LTR/ERVK;5531;5745;(1076);2062961	.	+	chr19	3137089	3137091	tss_116236	-	136895
+		$closest{$l[0]}{$l[3]}=$l[-1]; #key = chr, then RM line, value = distance to TSS	
+	}
+	return (\%closest);
+}
+
+#-----------------------------------------------------------------------------
+# Cleanup previous outputs
+# my ($stats,$out,$outb,$temp) =                                TEshuffle::prep_out("bed",$dir,$nboot,$filter,$input,$stype,$nonTE);
+# my ($stats,$outl,$outlb,$temp_l,$outp,$outpb,$temp_p,$temp) = TEshuffle::prep_out("tr", $dir,$nboot,$filter,$input,$stype,$nonTE,$linc,$prot,$shuffle);
+#-----------------------------------------------------------------------------
+sub prep_out {
+	my ($type,$dir,$nboot,$filter,$input,$stype,$nonTE,$linc,$prot,$shuffle) = @_;	
+	#common steps
+	my ($f_type,$f_name) = split(",",$filter) unless ($filter eq "na");		
+	my $inputname = filename($input);
+	my $stats;
+	($filter eq "na")?($stats = "$dir/$inputname.shuffle-$stype.nonTE-$nonTE.boot-$nboot.stats.tab"):
+                      ($stats = "$dir/$inputname.shuffle-$stype.nonTE-$nonTE.boot-$nboot.$f_name.stats.tab");		
+	`rm -Rf $dir.previous` if ((-e $dir) && (-e $dir.".previous"));
+	`mv $dir $dir.previous` if (-e $dir);
+	`mkdir $dir`;
+	#bed type - fewer directories
+	if ($type eq "bed") {
+		my ($out,$outb,$temp) = ("$dir/$inputname.no_boot","$dir/$inputname.boot","$dir/$inputname.temp");
+		`mkdir $temp` if ($nboot > 0);
+		return ($stats,$out,$outb,$temp);
+	} 
+	#tr type - more directories
+	if ($type eq "tr") {
+		my $lincname = filename($linc);
+		my $protname = filename($prot);
+		my ($outl,$outlb,$temp_l) = ("$dir/$lincname.no_boot","$dir/$lincname.boot","$dir/$lincname.temp");
+		my ($outp,$outpb,$temp_p) = ("$dir/$protname.no_boot","$dir/$protname.boot","$dir/$protname.temp");
+		`mkdir $temp_l` unless ($linc eq "n"); #also used for the -m 
+		`mkdir $temp_p` unless ($prot eq "n"); #also used for the -m 
+		my $shufname = filename($shuffle);
+		my $temp = "$dir/$shufname.temp";
+		`mkdir $temp` if ($nboot > 0);
+		return ($stats,$outl,$outlb,$temp_l,$outp,$outpb,$temp_p,$temp);
+	}
+	return 1;
+}	
+
+#-----------------------------------------------------------------------------
+# Shuffle, but keep distance to closest TSS
+# $shuffled = TEshuffle::shuffle_tss($toshuff_file,$temp,$i,$alltss,$closest) if ($stype eq "tss");
+#-----------------------------------------------------------------------------
+sub shuffle_tss {
+	my ($toshuff_file,$temp,$nb,$alltss,$closest) = @_;
+	my $out = $temp."/shufffled".$nb;	
+	open (my $fh, '>', $out) or confess "\n   ERROR (sub shuffle_tss): can't open to write $out $!\n";
+	CHR: foreach my $chr (sort keys %{$closest}) {
+		warn "     WARN: $chr not found in the -a file\n" if (! $alltss->{$chr});
+		next CHR if (! $alltss->{$chr});
+		fisher_yates_shuffle($alltss->{$chr}); # permutes @array in place; one array per chr => keep chr distribution
+		my $i = 0;
+		foreach my $te (keys %{$closest->{$chr}}) {
+			$i = 0 if (! $alltss->{$chr}[$i]); #basically, if end of the TSS for that chromosome, restart
+			my $tss = $alltss->{$chr}[$i];	
+			#get start and end, depends on strands
+			my @te = split(";",$te);
+			my $len = $te[6] - $te[5];
+			my ($st,$en);
+			my $dist = $closest->{$chr}{$te};
+			if ($tss->[1] eq "+") {
+				($dist > 0)?($st = $tss->[0] + $dist):($en = $tss->[0] - abs($dist)); #or + $dist
+				($dist > 0)?($en = $st + $len):($st = $en - $len);		
+			} else { 
+				($dist > 0)?($en = $tss->[0] - $dist):($st = $tss->[0] + abs($dist)); #or - $dist
+				($dist > 0)?($st = $en - $len):($en = $st + $len);		
+			}
+			print $fh "$chr\t$st\t$en\t$te\t.\t$te[8]\n"; #shuffled TE, same chromosome, with its distance to TSS maintained
+			$i++;
+		}
+	}
+	close ($fh);
+	return ($out);
+}
+
+#-----------------------------------------------------------------------------
+# Shuffle, but positions instead => keek current TE distribution
+# $shuffled = TEshuffle::shuffle_rm($toshuff_file,$temp,$i,$rm,$rm_c) if ($stype eq "rm");	
+#-----------------------------------------------------------------------------
+sub shuffle_rm {
+	my ($toshuff_file,$temp,$nb,$rm,$rm_c) = @_;
+	my $out = $temp."/shufffled".$nb;
+	open (my $fh, '>', $out) or confess "\n   ERROR (sub shuffle_rm): can't open to write $out $!\n";
+	CHR: foreach my $chr (sort keys %{$rm_c}) {
+		warn "     WARN: $chr not found in the -a file\n" if (! $rm_c->{$chr});
+		next CHR if (! $rm_c->{$chr});
+		fisher_yates_shuffle($rm_c->{$chr}) if ($rm_c->{$chr}[1]); # permutes @array in place; one array per chr => keep chr distribution
+		my $i = 0;
+		foreach my $te (@{$rm->{$chr}}) {			
+			my $l = join(";",@{$te}); #=> reconsititute the bed id
+			my $middle = $rm_c->{$chr}[$i];			
+			my $midlen = int(($te->[6] - $te->[5]) / 2 + 0.5);
+			my $st = $middle - $midlen;
+			my $en = $middle + $midlen;
+			print $fh "$chr\t$st\t$en\t$l\t.\t$te->[8]\n";
+			$i++;
+		}	
+	}
+	close $fh;
+	return ($out);
+}
+
+#-----------------------------------------------------------------------------
+# fisher_yates_shuffle
+#-----------------------------------------------------------------------------
+sub fisher_yates_shuffle { #http://www.perlmonks.org/?node_id=1869
+    my $array = shift;
+    my $i = @$array;
+    while ( --$i ) {
+        my $j = int rand( $i+1 );
+        @$array[$i,$j] = @$array[$j,$i];
+    }
 }
 
 #-----------------------------------------------------------------------------
 # Shuffle, with bedtools
-# my $shuffled = TEshuffle::shuffle($toshuff_file,$temp_s,$i,$excl,$incl,$build_file,$bedtools,$nooverlaps);
+# my $shuffled = TEshuffle::shuffle_bed($toshuff_file,$temp_s,$i,$excl,$incl,$build_file,$bedtools,$nooverlaps);
 #-----------------------------------------------------------------------------
-sub shuffle {
+sub shuffle_bed {
 	my ($toshuff_file,$temp_s,$nb,$excl,$incl,$build,$bedtools,$nooverlaps) = @_;
 	my $out = $temp_s."/shufffled".$nb;
 	my $bed_shuffle = $bedtools."shuffleBed";
-#  	($incl eq "na")?(print STDERR "      $bed_shuffle -i $toshuff_file -excl $excl -f 2 $shuff_allow_overlaps -g $build -chrom -maxTries 10000 > $out\n"):
-#  	                (print STDERR "      $bed_shuffle -incl $incl -i $toshuff_file -excl $excl -f 2 $shuff_allow_overlaps -g $build -chrom -maxTries 10000 > $out\n");
 	($incl eq "na")?(system "$bed_shuffle -i $toshuff_file -excl $excl -f 2 $nooverlaps -g $build -chrom -maxTries 10000 > $out"):
 	                (system "$bed_shuffle -incl $incl -i $toshuff_file -excl $excl -f 2 $nooverlaps -g $build -chrom -maxTries 10000 > $out");	
 	return ($out);
-
 }
 
 #----------------------------------------------------------------------------
@@ -325,18 +536,23 @@ sub get_Rclass_Rfam {
 # sub get_avg_and_sd
 #-----------------------------------------------------------------------------	
 sub get_avg_and_sd{
-	my($data) = @_;
+	my($data) = @_;    
     warn "WARN: (sub print_stats/get_avg_and_sd): empty data array $!\n" if (not @$data);
     return ($data->[0],"na") if (@$data == 1); #returning 0,0 was an issue if -m =1
         
 	my $total = 0;
-	foreach (@$data) {
-		$total += $_;
+	VALA: foreach (@$data) {
+		my $val = $_;
+		print STDERR "UNDEF in sub get_avg_and_sd\n" unless ($_);
+#		print Dumper($data) unless ($_);
+#		next VALA unless ($_);
+		$total += $val;
 	}
 	my $avg = $total / @$data;
 
 	my $sqtotal = 0;
-	foreach(@$data) {
+	VALM: foreach(@$data) {
+#		next VALM unless ($_);
 		$sqtotal += ($avg-$_) ** 2;
 	}
 	my $sd = ($sqtotal / (@$data-1)) ** 0.5;
@@ -362,13 +578,14 @@ sub get_sign {
 
 #-----------------------------------------------------------------------------
 # sub binomial_test_R
-# $exp = binomial_test_R($exp);
+# $exp = TEshuffle::binomial_test_R($exp,"bed");
+# $te_exp = TEshuffle::binomial_test_R($te_exp,"tr_rep");
 #-----------------------------------------------------------------------------
 sub binomial_test_R {
 	my ($exp,$type) = @_;
 	#Start R bridge
 	my $R = Statistics::R->new() ;
-	$R->startR ;
+	$R->startR;
 	
 	#2 types of hash structures
 	if ($type eq "bed") {
@@ -378,6 +595,7 @@ sub binomial_test_R {
 					my ($x,$n,$p) = ($exp->{$k1}{$k2}{$k3}{'x'},$exp->{$k1}{$k2}{$k3}{'n'},$exp->{$k1}{$k2}{$k3}{'p'});
 					#set values
 					($exp->{$k1}{$k2}{$k3}{'binom_prob'},$exp->{$k1}{$k2}{$k3}{'binom_conf'},$exp->{$k1}{$k2}{$k3}{'binom_pval'}) = ("na","na","na");
+					next KEY if ($p == 0);
 					print STDERR "        WARN: no value for total number (from parsed RM table), for {$k1}{$k2}{$k3}? => no binomial test\n" if ($n == 0);
 					next KEY if ($n == 0);								
 					print STDERR "        WARN: expected overlaps (avg) > total number (from parsed RM table), for {$k1}{$k2}{$k3}, likely due to multiple peaks overlapping with the repeat => no binomial test\n" if ($p > 1);				
@@ -393,19 +611,24 @@ sub binomial_test_R {
 				}
 			}
 		}
-	} elsif ($type eq "tr") {
+	} elsif ($type eq "tr") {	
 		foreach my $cat (keys %{$exp}) {
 			foreach my $t (keys %{$exp->{$cat}}) { 	
 				foreach my $k1 (keys %{$exp->{$cat}{$t}}) { 	
 					foreach my $k2 (keys %{$exp->{$cat}{$t}{$k1}}) {			
 						KEY: foreach my $k3 (keys %{$exp->{$cat}{$t}{$k1}{$k2}}) {
-							my ($x,$n,$p) = ($exp->{$cat}{$t}{$k1}{$k2}{$k3}{'x'},$exp->{$cat}{$t}{$k1}{$k2}{$k3}{'n'},$exp->{$cat}{$t}{$k1}{$k2}{$k3}{'p'});
+							my $x = $exp->{$cat}{$t}{$k1}{$k2}{$k3}{'x'};
+							my $n = $exp->{$cat}{$t}{$k1}{$k2}{$k3}{'n'};
+							my $p = $exp->{$cat}{$t}{$k1}{$k2}{$k3}{'p'};
 							#set values
-							($exp->{$cat}{$t}{$k1}{$k2}{$k3}{'binom_prob'},$exp->{$cat}{$t}{$k1}{$k2}{$k3}{'binom_conf'},$exp->{$cat}{$t}{$k1}{$k2}{$k3}{'binom_pval'}) = ("na","na","na");
-							print STDERR "        WARN: no value for total number (from parsed RM table), for {$k1}{$k2}{$k3}? => no binomial test\n" if ($n == 0);
-							next KEY if ($n == 0);								
-							print STDERR "        WARN: expected overlaps (avg) > total number (from parsed RM table), for {$k1}{$k2}{$k3}, likely due to multiple peaks overlapping with the repeat => no binomial test\n" if ($p > 1);				
-							next KEY if ($p > 1);								
+							$exp->{$cat}{$t}{$k1}{$k2}{$k3}{'binom_prob'} = "na"; 
+							$exp->{$cat}{$t}{$k1}{$k2}{$k3}{'binom_conf'} = "na";
+							$exp->{$cat}{$t}{$k1}{$k2}{$k3}{'binom_pval'} = "na";
+							#check now
+#							print STDERR "        WARN: expected was 0 for {$cat}{$t}{$k1}{$k2}{$k3} => no binomial test\n" if (! $n) || ($n == 0);
+							next KEY if (! $n) || ($n == 0);								
+							print STDERR "        WARN: expected overlaps (avg) > total number (from parsed RM table), for {$cat}{$t}{$k1}{$k2}{$k3}, likely due to multiple peaks overlapping with the repeat => no binomial test\n" if ($p > 1);				
+							next KEY if ($p > 1);			
 							$R->send(qq`d<-binom.test($x,$n,$p,alternative="two.sided")`);				
 							my $data = $R->get('d');		
 							my @data = @{$data};
