@@ -450,6 +450,7 @@ sub shuffle_tss {
 				($dist > 0)?($en = $tss->[0] - $dist):($st = $tss->[0] + abs($dist)); #or - $dist
 				($dist > 0)?($st = $en - $len):($en = $st + $len);		
 			}
+			$st = 1 if ($st <0); #added v4.2
 			print $fh "$chr\t$st\t$en\t$te\t.\t$te[8]\n"; #shuffled TE, same chromosome, with its distance to TSS maintained
 			$i++;
 		}
@@ -460,10 +461,10 @@ sub shuffle_tss {
 
 #-----------------------------------------------------------------------------
 # Shuffle, but positions instead => keek current TE distribution
-# $shuffled = TEshuffle::shuffle_rm($toshuff_file,$temp,$i,$rm,$rm_c) if ($stype eq "rm");	
+# $shuffled = TEshuffle::shuffle_rm($toshuff_file,$temp,$i,$rm,$rm_c,$okseq) if ($stype eq "rm");	
 #-----------------------------------------------------------------------------
 sub shuffle_rm {
-	my ($toshuff_file,$temp,$nb,$rm,$rm_c) = @_;
+	my ($toshuff_file,$temp,$nb,$rm,$rm_c,$okseq) = @_;
 	my $out = $temp."/shufffled".$nb;
 	open (my $fh, '>', $out) or confess "\n   ERROR (sub shuffle_rm): can't open to write $out $!\n";
 	CHR: foreach my $chr (sort keys %{$rm_c}) {
@@ -472,12 +473,22 @@ sub shuffle_rm {
 		fisher_yates_shuffle($rm_c->{$chr}) if ($rm_c->{$chr}[1]); # permutes @array in place; one array per chr => keep chr distribution
 		my $i = 0;
 		foreach my $te (@{$rm->{$chr}}) {			
-			my $l = join(";",@{$te}); #=> reconsititute the bed id
+			my $l = join(";",@{$te}); #=> reconstitute the bed id
 			my $middle = $rm_c->{$chr}[$i];			
 			my $midlen = int(($te->[6] - $te->[5]) / 2 + 0.5);
 			my $st = $middle - $midlen;
 			my $en = $middle + $midlen;
-			print $fh "$chr\t$st\t$en\t$l\t.\t$te->[8]\n";
+			if ($st < 0) {
+				my $shift = -$st; #put back in positive
+				$st = $st+$shift+1;
+				$en = $en+$shift+1;	
+			}
+			if ($okseq->{$chr} && $en > $okseq->{$chr}) {
+				my $shift = $en - $okseq->{$chr};
+				$st = $st-$shift;
+				$en = $okseq->{$chr};
+			}
+			print $fh "$chr\t$st\t$en\t$l\t.\t$te->[8]\n"; 
 			$i++;
 		}	
 	}

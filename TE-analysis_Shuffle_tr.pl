@@ -3,10 +3,10 @@
 # Author  :  Zev Kronenberg (https://github.com/zeeev), for the v1.0
 #            Modifications by Aurelie Kapusta (https://github.com/4ureliek) after v2.0
 # email   :  4urelie.k@gmail.com  
-# Purpose :  Writen to generate data (observed vs expected) shown in Figure 5, 
+# Purpose :  Originally writen to generate data (observed vs expected) shown in Figure 5, 
 #            Kapusta et al. 2013 PLoS Genetics
 #            (http://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1003470)
-#            But highly modified to be more useful
+#            But highly modified since then to be more useful
 #######################################################
 use strict;
 use warnings;
@@ -24,6 +24,7 @@ BEGIN {
 }
 use GAL::Annotation; #if issues, there is an alternative subroutine not using this module, see usage
 use TEshuffle;
+use Data::Dumper;
 
 #-----------------------------------------------------------------------------
 #------------------------------- DESCRIPTION ---------------------------------
@@ -31,7 +32,7 @@ use TEshuffle;
 #flush buffer
 $| = 1;
 
-my $version = "5.0";
+my $version = "6.1";
 my $scriptname = "TE-analysis_Shuffle.pl";
 my $changelog = "
 #	- v1.0 = 2012
@@ -70,36 +71,70 @@ my $changelog = "
 #       Use R for binomial test
 #       Get enrichment by age categories if age file provided
 #       TEshuffle.pm for subroutines shared with the shuffle_bed script
+#	- v6.0 = Mar 09 2017 [debugged]
+#      different choices to shuffle the TEs:
+#         - shufflebed = completely random positions, but same chromosome
+#         - shuffle inside the current TE positions, same chromosome
+#         - shuffle each TE, keeping its distance to a TSS, same chromosome - thanks to: Cedric Feschotte, Ed Chuong
+#      make subfolders for each input file (for the shuffled outputs)
+#      Also report observed values even if 0 in expected (interesting to see them in the obs, even if no stats possible)
+#      Needed to round \$x for the binomial test in R (closest integer)
+#	- v6.1 = Apr 04 2017
+#      the 'transcript' cat is in fact genes => fix the total counts to get proper %
+#	- v6.2 = Dec 01 2017
+#      Bug fix for when long TEs were shuffled to the position of small TEs that are
+#         too close to the start of the genomic sequence (led to negative starts).
+#         This is now checked for -s rm and -s tss:
+#            for -s rm, the TE is shifted of as many bp as needed
+#            for -s tss the start is simply changed to 1 (to avoid having a TE placed closer to a tss)
+#      Also added the option to use -r file in -s rm as well (to check ends) and chift the TE if needed.
 \n";
 
 # TO DO:
-#  - allow any bed or gff file for -s
+#  - allow any gff file for -s
 # BUG FIX NEEDED FOR THE TE OUTPUT
 # DIVIDE BY NUMBER OF GENES FOR THE TRANSCRIPT LINE IN THE CAT ONE
 
 my $usage = "
 Synopsis (v$version):
 
-    perl $scriptname -l lncRNA.gff -p prot.gff [-o <X>] [-m <X>] -s features_to_shuffle [-n <X>] [-f] -e exclude.range [-d] -r genome.range [-b] [-i include.range] [-a] [-l no_low] [-t <type,name>] [-c] [-w <bedtools_path>] [-v] [-h]
+    perl $scriptname -l lncRNA.gff -p prot.gff [-o <nt>] [-m <nb>] -q features_to_shuffle [-n <nb>] 
+            -s shuffling_type [-a <annotations>] [-f]
+            [-r <genome.range>] [-b] [-e <genome.gaps>] [-d] [-i <include.range>] [-x] 
+            [-w <bedtools_path>] [-u <no_low>] [-t <type,name>] [-c] [-g <TE.age.tab>] [-v] [-h]
 
     /!\\ REQUIRES - Bedtools, v2.25+
 	              - GAL::Annotation version later than Jan 2016 [update of is_coding]
 	                see https://github.com/The-Sequence-Ontology/GAL
-	                If issues, open the script in a text editor and comment line 15,	                
-	                as well as the lines with read_gff subroutine, and uncomment lines with subroutine load_gene_tr
+	                If issues with it, set the --just option                
     /!\\ Previous outputs, if any, will be moved as *.previous [which only saves results once]
-  
-  CITATION:
+
+    Typically, for the 3 types, the mandatory arguments are:
+    perl $scriptname -l lncRNA.gff -p prot.gff -q rm.out -s rm 
+    perl $scriptname -l lncRNA.gff -p prot.gff -q rm.out -s tss -a annotations.gtf
+    perl $scriptname -l lncRNA.gff -p prot.gff -q rm.out -s bed -r genome.range -e genome.gaps
+
+	Note that -r is advised for -s rm (but won't affect -s tss)
+
+  CITATIONS:
     - Cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
-      but should also include the GitHub link to this script
+      (http://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1003470)
+      but should also include the GitHub link to this script (and version)
     - for BEDtools, Quinlan AR and Hall IM (2010) Bioinformatics (DOI: 10.1093/bioinformatics/btq033)
 
+  SOME HISTORY:
+    Originally writen by Zev Kronenberg (https://github.com/zeeev) to generate 
+    data (observed vs expected) shown in Figure 5 of Kapusta et al. 2013 PLoS Genetics
+    But highly modified since then by A. Kapusta
+    Thanks to Edward Chuong, PhD, for inspiration of the shuffling '-t tss', 
+    and thanks to E. Chuong and Cedric Feschotte for helpful discussions 
+    during the development of this script
+
   DESCRIPTION:
-    Features provided in -s will be overlapped with -p and/or -l files,
-    without (no_boot) or with (boot) shuffling (on same chromosome)
-    One of -p or -l is mandatory. Having both in the same run means that they are 
-    intersected with the same TE files, which may be better for comparisons, 
-    but does not seem necessary with high bootstraps.
+    Features provided in -s will be overlapped with -p and/or -l files, without (no_boot) 
+    or with (boot) shuffling (on same chromosome). One of -p or -l is mandatory. H
+    aving both in the same run means that they are intersected with the same TE files, 
+    which may be better for comparisons, but does not seem necessary with high bootstraps.
        
     A random transcript per gene is selected: use -m to do several repetitions of no_boot
     
@@ -118,7 +153,7 @@ Synopsis (v$version):
    
     If you need to generate the <genome.gaps> file but you would also like to add more files to the -e option, 
     just do a first run with no bootstraps (in this example the genome.range is also being generated):
-    perl ~/bin/$scriptname -f input.bed -s genome.out -r genome.fa -b -e genome.fa -d -n 0
+    perl ~/bin/$scriptname -l input.gtf -q genome.out -r genome.fa -b -e genome.fa -d -n 0
 
     Two-tailed permutation test is done on the counts of overlaps for categories
     and the results are in a *.stats.cat.txt file
@@ -132,31 +167,77 @@ Synopsis (v$version):
   MANDATORY ARGUMENTS:
     -p,--prot     => (STRING) protein coding gff3 file; one of -p or -l is mandatory
     -l,--lnc      => (STRING) lncRNAs gff3 file; one of -p or -l is mandatory
-    -s,--shuffle  => (STRING) Features to shuffle = TE file
+    -q,--query    => (STRING) Features to shuffle = TE file
                               Repeat masker .out or the .bed file generated by the TE-analysis_pipeline                            
+    -s,--shuffle  => (STRING) Shuffling type. Should be one of the following:
+                               -t bed  => use bedtools shuffle, random position on the same chromosome
+                               -t rm   => shuffle inside the current TE positions; still random, but less
+                               -t tss  => shuffle the TEs on the same chromosome keeping their distance
+                                          to the closest TSS of an annotation file provided
+                                          (TSS are shuffled and then assigned to a TE; 
+                                          same TSS will be assigned multiple TEs if fewer TSS than TEs)
+                                          thanks to: Cedric Feschotte and Edward Chuong for the idea
+                                                                                    
+   MANDATORY ARGUMENTS IF USING -s tss:
+    -a,--annot    => (STRING) gtf or gff; annotations to load all unique TSS: will be used to set the distance
+                              between each TE and the closest TSS that will be kept while randomization
+                              Note that it requires transcript lines
+    -j,--just     => (BOOL)   GAL::Annotation seems to not really work on gtf files (won't load transcripts)
+                              When that happens, the script will die and switch to alternative way of loading
+                              transcripts. Or set this option directly to skip using GAL.
+
+   MANDATORY ARGUMENTS IF USING -s bed:
     -r,--range    => (STRING) To know the maximum value in a given chromosome/scaffold. 
                               File should be: Name \\t length
                               Can be files from UCSC, files *.chrom.sizes
-                              If you don't have such file, use -b (--build) and provide the genome fasta file for -r                              
-    -e,--excl     => (STRING) This will be used as -excl for bedtools shuffle: \"coordinates in which features from -i should not be placed.\"
+                              If you don't have such file, use -b (--build) and provide the genome fasta file for -r                               
+    -e,--excl     => (STRING) This will be used as -excl for bedtools shuffle: 
+                              \"coordinates in which features from -i should not be placed.\"
                               More than one file may be provided (comma separated), they will be concatenated 
                               (in a file = first-file-name.cat.bed).
                               By default, at least one file is required = assembly gaps, and it needs to be the first file
                               if not in bed format. Indeed, you may provide the UCSC gap file, with columns as:
                                   bin, chrom, chromStart, chromEnd, ix, n, size, type, bridge
-                              it will be converted to a bed file. Additionally, you may provide the genome file in fasta format
+                              it will be converted to a bed file. 
+                              If you do not have this file, you may provide the genome file in fasta format
                               and add the option -d (--dogaps), to generate a bed file corresponding to assembly gaps.
+                              If you need to generate the <genome.gaps> file but you would also 
+                              like to add more files to the -e option, just do a first run with 
+                              no bootstraps (in this example the genome.range is also being generated):
+                                 perl ~/bin/$scriptname -l lncRNA.gff -p prot.gff -q genome.out -s rm -r genome.fa -b -e genome.fa -d -n 0                                
                               Other files may correspond to regions of low mappability, for example for hg19:
                               http://www.broadinstitute.org/~anshul/projects/encode/rawdata/blacklists/hg19-blacklist-README.pdf
                               Notes: -> when the bed file is generated by this script, any N stretch > 50nt will be considered as a gap 
                                         (this can be changed in the load_gap subroutine)         
                                      -> 3% of the shuffled feature may overlap with these regions 
-                                        (this can be changed in the shuffle subroutine).	
-  OPTIONAL ARGUMENTS:
+                                        (this can be changed in the shuffle subroutine).
+
+   OPTIONAL ARGUMENTS IF USING -s bed:
+    -d,--dogaps   => (BOOL)   See above; use this and provide the genome fasta file if no gap file (-g)
+                              If several files in -e, then the genome needs to be the first one.
+                              This step is not optimized, it will take a while (but will create the required file)                       
+    -i,--incl     => (STRING) To use as -incl for bedtools shuffle: \"coordinates in which features from -i should be placed.\"
+                              Bed of gff format. Could be intervals close to TSS for example.
+                              More than one file (same format) may be provided (comma separated), 
+                              they will be concatenated (in a file = first-file-name.cat.bed)
+    -x,--x        => (BOOL)   to add the -noOverlapping option to the bedtools shuffle command line, 
+                              and therefore NOT allow overlaps between the shuffled features.
+                              This may create issues mostly if -i is used (space to shuffle may be too small to shuffle features)
+
+   OPTIONAL ARGUMENTS IF USING -s rm:
+    -r,--range    => (STRING) Optional, but advised; to know the maximum TE end in a given chromosome/scaffold. 
+                              File should be: Name \\t length
+                              Can be files from UCSC, files *.chrom.sizes
+                              If you don't have such file, use -b (--build) and provide the genome fasta file for -r                              
+       
+   OTHER OPTIONAL ARGUMENTS (for all -s):
+    -b,--build    => (BOOL)   See above; use this and provide the genome fasta file if no range/lengths file (-r)
+                              This step may take a while but will create the required file	
     -o,--overlap  => (INT)    Minimal length (in nt) of intersection in order to consider the TE included in the feature.
                               Default = 10 (to match the TEanalysis-pipeline.pl)
     -m,--more     => (INT)    Even in the no_boot, a random transcript is picked. Set this number to do repetitions for no_boot.
                               Default = 1 (still need it done 1 time; set this to 0 is equivalent to 1)
+                              For binomial test, the observed value will be the average, rounded to closest integer
     -n,--nboot    => (STRING) number of bootsraps with shuffled -s file
                               Default = 100 for faster runs; use higher -n for good pvalues 
                               (-n 10000 is best for permutation test but this will take a while)
@@ -166,37 +247,25 @@ Synopsis (v$version):
                               Note that the output *.stats.cat.txt is basically included in the output *.stats.TE.txt,
                               with values of tot tot tot in the columns Rclass, Rfam and Rname
                               This will take longer but requires fewer bootsraps, because binomial test is more sensitive
-    -b,--build    => (BOOL)   See above; use this and provide the genome fasta file if no range/lengths file (-r)
-                              This step may take a while but will create the required file	
-    -d,--dogaps   => (BOOL)   See above; use this and provide the genome fasta file if no gap file (-g)
-                              If several files in -e, then the genome needs to be the first one.
-                              This step is not optimized, it will take a while (but will create the required file)                       
+    -w,--where    => (STRING) if BEDtools are not in your path, provide path to BEDtools bin directory                             
 
-  OPTIONAL ARGUMENTS FOR BEDTOOLS SHUFFLING:
-    -i,--incl     => (STRING) To use as -incl for bedtools shuffle: \"coordinates in which features from -i should be placed.\"
-                              Bed of gff format. Could be intervals close to transcripts for example.
-                              More than one file (same format) may be provided (comma separated), 
-                              they will be concatenated (in a file = first-file-name.cat.bed)
-    -a,--add      => (BOOL)   to add the -noOverlapping option to the bedtools shuffle command line, 
-                              and therefore NOT allow overlaps between the shuffled features.
-                              This may create issues mostly if -i is used (space to shuffle into smaller than features to shuffle)
-    -w,--where    => (STRING) if BEDtools are not in your path, provide path to BEDtools bin directory
-
-   OPTIONAL ARGUMENTS FOR TE FILTERING: 
+   OPTIONAL ARGUMENTS FOR TE FILTERING (for all -s): 
     -u,--u        => (STRING) To set the behavior regarding non TE sequences: all, no_low, no_nonTE, none
-                                 -t all = keep all non TE sequences (no filtering)
-                                 -t no_low [default] = keep all besides low_complexity and simple_repeat
-                                 -t no_nonTE = keep all except when class = nonTE
-                                 -t none = everything is filtered out (nonTE, low_complexity, simple_repeat, snRNA, srpRNA, rRNA, tRNA/tRNA, satellite)
+                                 -u all = keep all non TE sequences (no filtering)
+                                 -u no_low [default] = keep all besides low_complexity and simple_repeat
+                                 -u no_nonTE = keep all except when class = nonTE
+                                 -u none = everything is filtered out 
+                                    (nonTE, low_complexity, simple_repeat, snRNA, srpRNA, rRNA, tRNA/tRNA, satellite)
     -t,--te       => (STRING) <type,name>
                               run the script on only a subset of repeats. Not case sensitive.
                               The type can be: name, class or family and it will be EXACT MATCH unless -c is chosen as well
-                              ex: -a name,nhAT1_ML => only fragments corresponding to the repeat named exactly nhAT1_ML will be looked at
-                                  -a class,DNA => all repeats with class named exactly DNA (as in ...#DNA/hAT or ...#DNA/Tc1)
-                                  -a family,hAT => all repeats with family named exactly hAT (so NOT ...#DNA/hAT-Charlie for example)
-    -c,--contain  => (BOOL)   to check if the \"name\" determined with -filter is included in the value in Repeat Masker output, instead of exact match
-                              ex: -a name,HERVK -c => all fragments containing HERVK in their name
-                                  -a family,hAT -c => all repeats with family containing hAT (...#DNA/hAT, ...#DNA/hAT-Charlie, etc)
+                              ex: -t name,nhAT1_ML => only fragments corresponding to the repeat named exactly nhAT1_ML will be looked at
+                                  -t class,DNA => all repeats with class named exactly DNA (as in ...#DNA/hAT or ...#DNA/Tc1)
+                                  -t family,hAT => all repeats with family named exactly hAT (so NOT ...#DNA/hAT-Charlie for example)
+    -c,--contain  => (BOOL)   to check if the \"name\" determined with -filter is included in 
+                              the value in Repeat Masker output, instead of exact match
+                              ex: -t name,HERVK -c => all fragments containing HERVK in their name
+                                  -t family,hAT -c => all repeats with family containing hAT (...#DNA/hAT, ...#DNA/hAT-Charlie, etc)
     -g,--group    => (STRING) provide a file with TE age: 
                                  Rname  Rclass  Rfam  Rclass/Rfam  %div(avg)  lineage  age_category
                               At least Rname and lineage are required (other columns can be \"na\"),
@@ -204,7 +273,7 @@ Synopsis (v$version):
                               be used as well. Typically:
                                   TE1  LTR  ERVL-MaLR  LTR/ERVL-MaLR  24.6  Eutheria  Ancient
                                   TE2  LTR  ERVL-MaLR  LTR/ERVL-MaLR   9.9  Primates  LineageSpe
-                                  
+    
    OPTIONAL ARGUMENTS (GENERAL): 
     -v,--version  => (BOOL)   print the version
     -h,--help     => (BOOL)   print this usage
@@ -213,7 +282,7 @@ Synopsis (v$version):
 #-----------------------------------------------------------------------------
 #------------------------------ LOAD AND CHECK -------------------------------
 #-----------------------------------------------------------------------------
-my ($shuffle,$full,$exclude,$dogaps,$build,$dobuild,$f_regexp,$allow,$nooverlaps,$v,$help);
+my ($shuffle,$stype,$tssfile,$just,$full,$exclude,$dogaps,$build,$dobuild,$f_regexp,$allow,$nooverlaps,$v,$help);
 my ($prot,$linc) = ("n","n");
 my $inters = 10;
 my $more = 0;
@@ -228,7 +297,10 @@ my $opt_success = GetOptions(
 			 	  'prot=s'		=> \$prot,
 			 	  'lnc=s'		=> \$linc,
 			 	  'more=s'      => \$more,
-			 	  'shuffle=s'   => \$shuffle,
+			 	  'query=s'     => \$shuffle,
+			 	  'shuffle=s'   => \$stype,
+			 	  'annot=s'     => \$tssfile,
+			 	  'just'        => \$just,				 	  
 			 	  'overlap=s'   => \$inters,
 			 	  'nboot=s'     => \$nboot,
 			 	  'full'        => \$full,
@@ -237,7 +309,7 @@ my $opt_success = GetOptions(
 			 	  'excl=s'		=> \$exclude,
 			 	  'dogaps'      => \$dogaps,
 			 	  'incl=s'		=> \$incl,
-			 	  'add'		    => \$nooverlaps,
+			 	  'x'		    => \$nooverlaps,
 			 	  'u=s'		    => \$nonTE,
 			 	  'te=s'		=> \$filter,
 			 	  'contain'     => \$f_regexp,
@@ -248,23 +320,37 @@ my $opt_success = GetOptions(
 			 	  
 #Check options, if files exist, etc
 die "\n --- $scriptname version $version\n\n" if $v;
-die $usage if $help || ! $opt_success;
-die $usage unless (($shuffle) && ($exclude) && (($prot ne "n") || ($linc ne "n" )));
+die $usage if ($help);
+die "\n SOME MANDATORY ARGUMENTS MISSING, CHECK USAGE:\n$usage" if (((! $linc) && (! $prot)) || ! $shuffle || ! $stype);
+die "\n One of -l or -p needs to be provided\n\n" if (($prot eq "n") && ($linc eq "n" ));
+die "\n -t is required\n\n" if ( ! $stype);
+die "\n -q is required\n\n" if ( ! $shuffle);
+
 die "\n -p $prot does not exist?\n\n"  if (($prot ne "n") && (! -e $prot));
 die "\n -p $prot is not a gff file?\n\n" unless (($prot eq "n") || ($prot =~ /\.gff$/) || ($prot =~ /\.gff3$/));
 die "\n -l $linc does not exist?\n\n"  if (($linc ne "n") && (! -e $linc));
 die "\n -l $linc is not a gff file?\n\n" unless (($linc eq "n") || ($linc =~ /\.gff$/) || ($linc =~ /\.gff3$/));
-die "\n -s $shuffle does not exist?\n\n"  if (! -e $shuffle);
-die "\n -s $shuffle is not in a proper format (not .out, .bed, .gff or .gff)?\n\n" unless (($shuffle =~ /\.out$/) || ($shuffle =~ /\.bed$/) || ($shuffle =~ /\.gff$/) || ($shuffle =~ /\.gff3$/));
-die "\n -i $incl does not exist?\n\n"  if (($incl ne "na") && ($exclude !~ /,/) && (! -e $incl));
-die "\n -r $build does not exist?\n\n"  if (! -e $build);
-die "\n -e $exclude does not exist?\n\n"  if (($exclude !~ /,/) && (! -e $exclude));
+
+die "\n -q $shuffle is not in a proper format? (not .out, .bed, .gff or .gff3)\n\n" unless (($shuffle =~ /\.out$/) || ($shuffle =~ /\.bed$/) || ($shuffle =~ /\.gff$/) || ($shuffle =~ /\.gff3$/));
+die "\n -q $shuffle does not exist?\n\n" if (! -e $shuffle);
+die "\n -s $stype should be one of the following: bed, rm or tss\n\n" if (($stype ne "bed") && ($stype ne "rm") && ($stype ne "tss"));
+#deal with conditional mandatory stuff
+die "\n -s tss was set, but -a is missing?\n\n" if (($stype eq "tss") && (! $tssfile));
+die "\n -a $tssfile does not exist?\n\n" if (($tssfile) && (! -e $tssfile));
+if ($stype eq "bed") {
+	die "\n -s bed was set, but -r is missing?\n\n" if (! $build);
+	die "\n -s bed was set, but -e is missing?\n\n" if (! $exclude);
+	die "\n -r $build does not exist?\n\n" if (! -e $build);
+	die "\n -e $exclude does not exist?\n\n" if (($exclude !~ /,/) && (! -e $exclude)); #if several files, can't check existence here
+	die "\n -i $incl does not exist?\n\n" if (($incl ne "na") && ($incl !~ /,/) && (! -e $incl)); #if several files, can't check existence here
+}
+#Now the rest
 die "\n -n $nboot but should be an integer\n\n" if ($nboot !~ /\d+/);
 die "\n -i $inters but should be an integer\n\n" if ($inters !~ /\d+/);
-die "\n -m $more but should be an integer\n\n" if ($more !~ /\d+/);
-die "\n -w $bedtools does not exist?\n\n"  if (($bedtools ne "") && (! -e $bedtools));
+die "\n -w $bedtools does not exist?\n\n" if (($bedtools ne "") && (! -e $bedtools));
 die "\n -t requires 2 values separated by a coma (-t <name,filter>; use -h to see the usage)\n\n" if (($filter ne "na") && ($filter !~ /,/));
 die "\n -g $TEage does not exist?\n\n" if (($TEage ne "na") && (! -e $TEage));
+
 ($full)?($full = "y"):($full = "n");
 ($dogaps)?($dogaps = "y"):($dogaps = "n");
 ($dobuild)?($dobuild = "y"):($dobuild = "n");
@@ -278,65 +364,104 @@ $more = 1 if ($more == 0); #1 rep if set to 0, same thing here
 #----------------------------------- MAIN ------------------------------------
 #-----------------------------------------------------------------------------
 #Prep steps
-print STDERR "\n --- $scriptname v$version\n";
+print STDERR "\n --- $scriptname v$version started, with:\n";
+print STDERR "     input lncRNA file = $linc\n" if ($linc ne "n");
+print STDERR "     input mRNA file = $prot\n" if ($prot ne "n");
+print STDERR "     features to shuffle = $shuffle\n";
+print STDERR "     shuffling type = $stype\n";
 
-#Genome range
-print STDERR " --- loading build (genome range)\n";
-my ($okseq,$build_file) = TEshuffle::load_build($build,$dobuild);
+#Outputs
+print STDERR " --- prepping output directories and files\n";
+my ($input);
+($linc)?($input = $linc):($input = $prot);
+my $dir = $input.".shuffle-".$stype.".".$nboot;
+print STDERR "     output directory = $dir\n";
+my ($stats,$outl,$outlb,$temp_l,$outp,$outpb,$temp_p,$temp) = TEshuffle::prep_out("tr",$dir,$nboot,$filter,$input,$stype,$nonTE,$linc,$prot,$shuffle);
 
-#Files to exclude for shuffling
-print STDERR " --- getting ranges to exclude in the shuffling of features from $exclude\n";
-my @exclude = ();
-if ($exclude =~ /,/) {
-	($dogaps eq "y")?(print STDERR "     several files provided, -d chosen, genome file (fasta) should be the first one\n"):
-	                 (print STDERR "     several files provided, assembly gaps should be the first one\n");
-	@exclude = split(",",$exclude) if ($exclude =~ /,/);
-} else {
-	$exclude[0] = $exclude;
+#Chosomosome sizes / Genome range
+my ($okseq,$build_file);
+if ($build || $dobuild) {
+	print STDERR " --- loading build (genome range)\n";
+	($okseq,$build_file) = TEshuffle::load_build($build,$dobuild);
 }
-$exclude[0] = TEshuffle::load_gap($exclude[0],$dogaps);
-print STDERR "     concatenating files for -e\n" if ($exclude =~ /,/);
-my $excl;
-($exclude =~ /,/)?($excl = TEshuffle::concat_beds(\@exclude)):($excl = $exclude[0]);
 
-#If relevant, files to include for shuffling
-if (($incl ne "na") && ($incl =~ /,/)) {
-	print STDERR " --- concatenating $incl files to one file\n";
-	my @include = split(",",$incl);
-	$incl = TEshuffle::concat_beds(\@include);
+#prep steps if shuffling type is bed
+my $excl;
+if ($stype eq "bed") {
+	#Files to exclude for shuffling
+	print STDERR " --- getting ranges to exclude in the shuffling of features from $exclude\n";
+	my @exclude = ();
+	if ($exclude =~ /,/) {
+		($dogaps eq "y")?(print STDERR "     several files provided, -d chosen, genome file (fasta) should be the first one\n"):
+						 (print STDERR "     several files provided, assembly gaps should be the first one\n");
+		@exclude = split(",",$exclude) if ($exclude =~ /,/);
+	} else {
+		$exclude[0] = $exclude;
+	}
+	$exclude[0] = TEshuffle::load_gap($exclude[0],$dogaps);
+	print STDERR "     concatenating files for -e\n" if ($exclude =~ /,/);
+	($exclude =~ /,/)?($excl = TEshuffle::concat_beds(\@exclude)):($excl = $exclude[0]);
+
+	#If relevant, files to include for shuffling
+	if (($incl ne "na") && ($incl =~ /,/)) {
+		print STDERR " --- concatenating $incl files to one file\n";
+		my @include = split(",",$incl);
+		$incl = TEshuffle::concat_beds(\@include);
+	}
 }
 
 #Load TEage if any
-print STDERR " --- Loading TE ages from $TEage\n";
+print STDERR " --- Loading TE ages from $TEage\n" unless ($TEage eq "na");
 my $age = ();
 $age = TEshuffle::load_TEage($TEage,$v) unless ($TEage eq "na");
 
-#Now features to shuffle
+#Now features to shuffle (need to be after in case there was $okseq loaded)
 print STDERR " --- checking file in -s, print in .bed if not a .bed or gff file\n";
 print STDERR "     filtering TEs based on filter ($filter) and non TE behavior ($nonTE)\n" unless ($filter eq "na");
-print STDERR "     + getting genomic counts for each repeat\n" unless ($full eq "n");
-my ($toshuff_file,$parsedRM) = TEshuffle::RMtobed($shuffle,$okseq,$filter,$f_regexp,$nonTE,$age,$full);
+print STDERR "     + getting genomic counts for each repeat\n";
+print STDERR "     + load all TE positions in a hash (since $stype is set to rm)\n" if ($stype eq "rm") ;
+my ($toshuff_file,$parsedRM,$rm,$rm_c) = TEshuffle::RMtobed($shuffle,$okseq,$filter,$f_regexp,$nonTE,$age,"y",$stype); #Note: $rm and $rm_c are empty unless $stype eq rm
 
-#Load the gff files
+#prep steps if shuffling type is tss
+my ($tssbed,$closest,$alltss);
+if ($stype eq "tss")  {
+	#sort TEs
+	my $bedsort = $bedtools."bedtools sort";
+	my $sorted = $toshuff_file;
+	$sorted =~ s/\.bed$/\.sorted\.bed/;
+	print STDERR " --- sorting features of $toshuff_file\n" unless (-e $sorted);	
+	print STDERR "     $bedsort -i $toshuff_file > $sorted\n" unless (-e $sorted);	
+	`$bedsort -i $toshuff_file > $sorted` unless (-e $sorted);
+	$toshuff_file = $sorted;
+	print STDERR " --- loading the tss from $tssfile\n";
+	#print the tss in a bed file => use bedtools closest
+	($tssbed,$alltss) = TEshuffle::load_and_print_tss($tssfile);	
+	print STDERR " --- sorting features in the tss file\n" unless (-e "$tssbed.bed");
+	print STDERR "     $bedsort -i $tssbed > $tssbed.bed\n" unless (-e "$tssbed.bed");
+	`$bedsort -i $tssbed > $tssbed.bed` unless (-e "$tssbed.bed");
+	$tssbed = $tssbed.".bed";
+	#get the closest tss if relevant
+	my $tssclosest = $toshuff_file.".closest.tss";
+	my $closestBed = $bedtools."closestBed";
+	print STDERR " --- getting closest tss for each feature in $toshuff_file, with the command line below\n";
+	print STDERR "     $closestBed -a $toshuff_file -b $tssbed -D b -first > $tssclosest\n"; #I want only one entry per TE, therefore -t first
+	`$closestBed -a $toshuff_file -b $tssbed -D b -t first > $tssclosest`;
+	print STDERR " --- loading distance to TSS\n";
+	$closest = TEshuffle::load_closest_tss($tssclosest);
+}
+
+#Load the gff file(s)
 print STDERR " --- Load gene IDs / transcript IDs for:\n";
 my $whichgene = ();
 my $l_tr = ();
 my $p_tr = ();
+my $flagGAL = 0;
 print STDERR "  -> $linc\n" unless ($linc eq "n");
-($l_tr,$whichgene) = read_gff($linc, $okseq, 0, $whichgene) unless ($linc eq "n"); #comment if GAL::Annotation is a problem
-# ($l_tr,$whichgene) = load_gene_tr($linc,$okseq,$whichgene) unless ($linc eq "n"); #uncomment if GAL::Annotation is a problem
+($l_tr,$whichgene,$flagGAL) = read_gff($linc,$okseq,0,$whichgene,$stype) if (($linc ne "n") && (! $just));
+($l_tr,$whichgene) = load_gene_tr($linc,$okseq,0,$whichgene,$stype) if (($linc ne "n") && (($just) || ($flagGAL == 1))); #if GAL::Annotation is a problem
 print STDERR "  -> $prot\n" unless ($prot eq "n");
-($p_tr,$whichgene) = read_gff($prot, $okseq, 1, $whichgene) unless ($prot eq "n"); #comment if GAL::Annotation is a problem
-# ($p_tr,$whichgene) = load_gene_tr($prot,$okseq,$whichgene) unless ($prot eq "n"); #uncomment if GAL::Annotation is a problem
-
-#Outputs
-my ($stats,$input);
-($linc)?($input = $linc):($input = $prot);
-my ($f_type,$f_name) = split(",",$filter) unless ($filter eq "na");	
-($filter eq "na")?($stats = "$input.nonTE-$nonTE.$nboot.boot.stats"):($stats = "$input.nonTE-$nonTE.$f_name.$nboot.boot.stats");		
-my ($outl,$outlb,$temp_l,$outp,$outpb,$temp_p) = ("$linc.no_boot","$linc.boot","$linc.temp","$prot.no_boot","$prot.boot","$prot.temp");
-my $temp_s = "$toshuff_file.temp";
-cleanup_out($outl,$outp,$outlb,$outpb,$catout,$stats,$temp_l,$temp_p,$temp_s,$nboot,$linc,$prot);
+($p_tr,$whichgene,$flagGAL) = read_gff($prot,$okseq,1,$whichgene,$stype) if (($prot ne "n") && (! $just));
+($p_tr,$whichgene) = load_gene_tr($prot,$okseq,1,$whichgene,$stype) if (($prot ne "n") && (($just) || ($flagGAL == 1))); #if GAL::Annotation is a problem
 
 #Join -p and/or -l files
 my $intersectBed = $bedtools."intersectBed";
@@ -353,8 +478,12 @@ my $no_boot = ();
 my $no_boot_tot_exons = ();
 for(my $j = 1; $j <= $more; $j++) {
 	print STDERR "     ..$j rounds done\n" if (($j == 10) || ($j == 100) || ($j == 1000) || (($j > 1000) && (substr($j/1000,-1,1) == 0)));	
-	($no_boot,$no_boot_tot_exons) = check_for_featured_overlap("$temp_l/no_boot.joined",$l_tr,"no_boot.".$j,'transcript',$outl,$inters,$no_boot,$no_boot_tot_exons,$whichgene,$full) unless ($linc eq "n");
-	($no_boot,$no_boot_tot_exons) = check_for_featured_overlap("$temp_p/no_boot.joined",$p_tr,"no_boot.".$j,'mRNA',$outp,$inters,$no_boot,$no_boot_tot_exons,$whichgene,$full) unless ($prot eq "n");
+	($no_boot,$no_boot_tot_exons) = 
+		check_for_featured_overlap("$temp_l/no_boot.joined",$l_tr,"no_boot.".$j,'transcript',$outl,$inters,$no_boot,$no_boot_tot_exons,$whichgene,$full) 
+		unless ($linc eq "n");
+	($no_boot,$no_boot_tot_exons) = 
+		check_for_featured_overlap("$temp_p/no_boot.joined",$p_tr,"no_boot.".$j,'mRNA',$outp,$inters,$no_boot,$no_boot_tot_exons,$whichgene,$full) 
+		unless ($prot eq "n");
 	`cat $outl >> $catout.no-boot.txt` if (($catout) && (-e $outl));
 	`cat $outp >> $catout.no-boot.txt` if (($catout) && (-e $outp));
 }
@@ -366,17 +495,18 @@ my $boots_tot_exons = ();
 if ($nboot > 0) {
 	foreach (my $i = 1; $i <= $nboot; $i++) {
 		print STDERR "     ..$i bootstraps done\n" if (($i == 10) || ($i == 100) || ($i == 1000) || (($i > 1000) && (substr($i/1000,-1,1) == 0)));	
-# 		print STDERR "  -- BOOTSTRAP $i\n";	
-# 		print STDERR "     Shuffle features with command line:\n";
-		my $shuffled = TEshuffle::shuffle($toshuff_file,$temp_s,$i,$excl,$incl,$build_file,$bedtools,$nooverlaps);
-# 		print STDERR " --- Intersect with command lines:\n";
-# 		print STDERR "      $intersectBed -a $shuffled -b $linc -wo > $temp_l/boot.$i.joined\n" unless ($linc eq "n");
+		my $shuffled;
+		$shuffled = TEshuffle::shuffle_tss($toshuff_file,$temp,$i,$alltss,$closest) if ($stype eq "tss");
+		$shuffled = TEshuffle::shuffle_rm($toshuff_file,$temp,$i,$rm,$rm_c,$okseq) if ($stype eq "rm");	
+		$shuffled = TEshuffle::shuffle_bed($toshuff_file,$temp,$i,$excl,$incl,$build_file,$bedtools,$nooverlaps) if ($stype eq "bed");
  		system "      $intersectBed -a $shuffled -b $linc -wo > $temp_l/boot.$i.joined" unless ($linc eq "n");
-# 		print STDERR "      $intersectBed -a $shuffled -b $prot -wo > $temp_p/boot.$i.joined\n" unless ($prot eq "n");
- 		system "      $intersectBed -a $shuffled -b $prot -wo > $temp_p/boot.$i.joined" unless ($prot eq "n");
-# 		print STDERR " --- Check intersections of $linc and $prot with features in $shuffled (expected)\n";
-		($boots,$boots_tot_exons) = check_for_featured_overlap("$temp_l/boot.$i.joined",$l_tr,"boot.".$i,'transcript',$outlb,$inters,$boots,$boots_tot_exons,$whichgene,$full) unless ($linc eq "n");
-		($boots,$boots_tot_exons) = check_for_featured_overlap("$temp_p/boot.$i.joined",$p_tr,"boot.".$i,'mRNA',$outpb,$inters,$boots,$boots_tot_exons,$whichgene,$full) unless ($prot eq "n");;
+ 		system "      $intersectBed -a $shuffled -b $prot -wo > $temp_p/boot.$i.joined" unless ($prot eq "n");	
+		($boots,$boots_tot_exons) = 
+			check_for_featured_overlap("$temp_l/boot.$i.joined",$l_tr,"boot.".$i,'transcript',$outlb,$inters,$boots,$boots_tot_exons,$whichgene,$full) 
+			unless ($linc eq "n");
+		($boots,$boots_tot_exons) = 
+			check_for_featured_overlap("$temp_p/boot.$i.joined",$p_tr,"boot.".$i,'mRNA',$outpb,$inters,$boots,$boots_tot_exons,$whichgene,$full) 
+			unless ($prot eq "n");		
 		`cat $outlb >> $catout.boot.txt` if (($catout) && (-e $outlb));
 		`cat $outpb >> $catout.boot.txt` if (($catout) && (-e $outpb));
 		`rm -Rf $shuffled`; #these files are now not needed anymore, all is stored
@@ -384,7 +514,6 @@ if ($nboot > 0) {
 		`rm -Rf $temp_p/boot.$i.joined` unless ($prot eq "n");
 	}
 }
-`rm -Rf $temp_s`; #these folders are not needed anymore
 `rm -Rf $temp_l` unless ($linc eq "n");
 `rm -Rf $temp_p` unless ($prot eq "n");
 
@@ -405,12 +534,13 @@ exit;
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 # Load geneIDs{type}{trIDs}
-# my $l_tr = load_gene_tr($lincs,$okseq,$whichgene);
-# my $p_tr = load_gene_tr($prot,$okseq,$whichgene);
+# ($l_tr,$whichgene) = load_gene_tr($linc,$okseq,0,$whichgene,$stype) if (($linc ne "n") && (($just) || ($flagGAL == 1))); #if GAL::Annotation is a problem
+# ($p_tr,$whichgene) = load_gene_tr($prot,$okseq,1,$whichgene,$stype) if (($prot ne "n") && (($just) || ($flagGAL == 1))); #if GAL::Annotation is a problem
 #-----------------------------------------------------------------------------
 sub load_gene_tr {
 	#Not as solid as using GAL::Annotation, but it is an alternative
-	my ($file,$okseq,$whichgene) = @_;
+	my ($file,$okseq,$coding,$whichgene,$stype) = @_;
+    print STDERR "     Loading transcripts / genes relationships without using GAL::Annotation\n";
 	my %tr = ();
 	my ($gid,$trid,$type);
 	open(my $fh, "<$file") or confess "\n   ERROR (sub load_gene_tr): could not open to read $file!\n";
@@ -418,7 +548,7 @@ sub load_gene_tr {
 		chomp(my $l = $_);
 		next LINE if (substr($l,0,1) eq "#");
 		my @l = split('\s+',$l);
-		next LINE unless (defined $okseq->{$l[0]}); #if not in build of stuff OK to shuffle on, remove here as well
+		next LINE if (($stype eq "bed") && (! $okseq->{$l[0]})); #if not in build of stuff OK to shuffle on, remove here as well; only relevant for -s bed though
 		my $id = $l[8];
 		$id = $1 if $id =~ /^ID=(.+?);/;
 		if ($l[2] eq "gene") {
@@ -426,7 +556,7 @@ sub load_gene_tr {
 		} elsif ($l[2] eq "transcript") {
 			$trid = $id;
 			$type = "transcript";
-			$type = "mRNA" if ($l =~ /protein_coding/); #if coding, it should be in the "gene_type" or the "transcript_type"
+			$type = "mRNA" if (($l =~ /protein_coding/) || ($coding == 1)); #if coding, it should be in the "gene_type" or the "transcript_type", but if not assume when coding is set to 1, it's coding
 			$tr{$gid}{$type}{$trid}{'st'} = $l[3];
 			$tr{$gid}{$type}{$trid}{'en'} = $l[4];
 			$whichgene->{$trid}=$gid;
@@ -442,13 +572,14 @@ sub load_gene_tr {
 
 #-----------------------------------------------------------------------------
 # Load geneIDs{type}{trIDs} with GAL::Annotation
-# ($l_tr,$whichgene) = read_gff($linc, $okseq, 0, $whichgene);
-# ($p_tr,$whichgene) = read_gff($linc, $okseq, 0, $whichgene);
+# ($l_tr,$whichgene) = read_gff($linc,$okseq,0,$whichgene,$stype) unless ($linc eq "n")
+# ($p_tr,$whichgene) = read_gff($prot,$okseq,1,$whichgene,$stype) unless ($prot eq "n");
 #-----------------------------------------------------------------------------
 sub read_gff {
-	my ($gff3_file,$okseq,$coding,$whichgene) = @_;
+	my ($gff3_file,$okseq,$coding,$whichgene,$stype) = @_;
     my %trinfo;
 	my $gene_count=0;
+	my $flagGAL = 0;
 	#load annotations through GAL::Annotation
     my $annotation = GAL::Annotation->new($gff3_file);
     my $features = $annotation->features;
@@ -461,8 +592,7 @@ sub read_gff {
 		}
 		my $gene_id = $gene->feature_id;
 		my $seqid   = $gene->seqid;
-		next GENE unless (defined $okseq->{$seqid});
-		
+		next GENE if (($stype eq "bed") && (! $okseq->{$seqid})); #if not in build of stuff OK to shuffle on, remove here as well; only relevant for -s bed though
 		my @tr = $gene->transcripts;
 		TRANSCRIPT: foreach my $tr (@tr) {
 			my $tr_id = $tr->feature_id;
@@ -489,30 +619,10 @@ sub read_gff {
 		$gene_count++;		
 	}
     print STDERR "        total genes loaded (type=$type): $gene_count\n";	
-	return (\%trinfo,$whichgene);
+    $flagGAL = 1 if ($gene_count == 0);
+    print STDERR "        WARN: gene count = 0, transcript info will (try to) be loaded without GAL::Annotation\n" if ($gene_count == 0);
+	return (\%trinfo,$whichgene,$flagGAL);
 }
-
-#-----------------------------------------------------------------------------
-# Cleanup outputs
-# cleanup_out($outl,$outp,$outlb,$outpb,$catout,$stats,$temp_l,$temp_p,$temp_s,$nboot,$linc,$prot);
-#-----------------------------------------------------------------------------
-sub cleanup_out {
-	my ($outl,$outp,$outlb,$outpb,$catout,$stats,$temp_l,$temp_p,$temp_s,$nboot,$linc,$prot) = @_;
-	`mv $outl $outl.previous` if (-e $outl);
-	`mv $outp $outp.previous` if (-e $outp);
-	`mv $outlb $outlb.previous` if (-e $outlb);
-	`mv $outpb $outpb.previous` if (-e $outpb);
-	`mv $stats.cat.txt $stats.cat.txt.previous` if (-e $stats.".cat.txt");
-	`mv $stats.TE.txt $stats.TE.txt.previous` if (-e $stats.".TE.txt");
-	`mv $stats.details.txt $stats.details.txt.previous` if (-e $stats.".details.txt");
-	`rm -Rf $temp_l` if (-e $temp_l);
-	`rm -Rf $temp_p` if (-e $temp_p);
-	`rm -Rf $temp_s` if (-e $temp_s);
-	`mkdir $temp_l` unless ($linc eq "n");
-	`mkdir $temp_p` unless ($prot eq "n");
-	`mkdir $temp_s` if ($nboot > 0);
-	return 1;
-}	
 
 #-----------------------------------------------------------------------------
 # Check overlap with TEs and count
@@ -556,7 +666,8 @@ sub check_for_featured_overlap {
 			my $gid = $whichgene->{$trid};			
 			$chosen_tr{$gid} = random_tr($infos,$gid,$type) unless (defined $chosen_tr{$gid}); #%infos contain infos about the transcript => start, end, number of exons in it
 			my $chosen = $chosen_tr{$gid};
-			$total_exons->{$type}{$fileid}{'tot'}+=$infos->{$gid}{$type}{$chosen}{'nb'} unless (defined $checkgenes{$gid}); #increment with exon numbers of the transcript chosen for this gene
+			$total_exons->{$type}{$fileid}{'tot'}+=$infos->{$gid}{$type}{$chosen}{'nb'} 
+				unless (defined $checkgenes{$gid}); #increment with exon numbers of the transcript chosen for this gene
 			$checkgenes{$gid}=1; #store that exons of a random transcript for this gene have been counted			
 			next LINE if ($trid ne $chosen); #skip if not randomly chosen transcript that is hit	
 			
@@ -565,21 +676,27 @@ sub check_for_featured_overlap {
 
 			#now check what category of overlap this exon is;
 			my $cat = overlap_category(\@l,$infos,$gid,$type,$trid);
-						
+		
 			#now increment in the data structure		
 			#since only one transcript per gene, there should be no worry here about unique counts, 1 exon can only be counted one time in a category; 
 			#however unique exon hits count need a check, and there could be TE overlaps fucking things up, so better safe than sorry	
 			unless (defined $check{$l[14]}{$cat}) { 
-				($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'})?($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'}++):($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'}=1);
+				($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'})?
+				($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'}++):($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'}=1);
 			}
 			$check{$l[14]}{$cat}=1;
 			$total_exons->{$type}{$fileid}{'hit'}++ unless (defined $check{$l[14]}{'hit'});
 			$check{$l[14]}{'hit'}=1;
-			unless (defined $check{$chosen}{'hit'}) { #counting each tr hit only one time
-				($counts->{'transcript'}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'})?($counts->{'transcript'}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'}++):($counts->{'transcript'}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'}=1);
-				($counts->{'transcript'}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'})?($counts->{'transcript'}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}++):($counts->{'transcript'}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}=1); #duplicate, but it's easier that way
+			unless (defined $check{$gid}{'hit'}) { #counting each tr hit only one time => equivalent to a number of genes, not transcripts
+#			unless (defined $check{$chosen}{'hit'}) {
+				($counts->{'transcript'}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'})?
+				($counts->{'transcript'}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'}++):($counts->{'transcript'}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'}=1);
+				#duplicate, but it's easier that way:
+				($counts->{'transcript'}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'})?
+				($counts->{'transcript'}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}++):($counts->{'transcript'}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}=1); 
 			}	
-			$check{$chosen}{'hit'}=1;
+			$check{$gid}{'hit'}=1;
+#			$check{$chosen}{'hit'}=1;
 			
 			#Do the repeats stuff if relevant
 			unless ($full eq "n") {
@@ -590,17 +707,20 @@ sub check_for_featured_overlap {
 				my ($Rcla,$Rfam) = TEshuffle::get_Rclass_Rfam($Rnam,$rm[10]);
 				#Increment in the data structure, but only if relevant = avoid counting hits several times
 				unless ($checkTE{$l[14]}{$cat}{$type}{'tot'}) {
-					($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'})?($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}++):($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}=1);
+					($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'})?
+					($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}++):($counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}=1);
 				}	
 				unless ($checkTE{$l[14]}{$cat}{$type}{$Rcla}) {
-					($counts->{$cat}{$type}{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'})?($counts->{$cat}{$type}{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'}++):($counts->{$cat}{$type}{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'}=1);
-			
+					($counts->{$cat}{$type}{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'})?
+					($counts->{$cat}{$type}{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'}++):($counts->{$cat}{$type}{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'}=1);			
 				}
 				unless ($checkTE{$l[14]}{$cat}{$type}{$Rcla.$Rfam}) {
-					($counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'})?($counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'}++):($counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'}=1);
+					($counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'})?
+					($counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'}++):($counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'}=1);
 				}
 				unless ($checkTE{$l[14]}{$cat}{$type}{$Rcla.$Rfam.$Rnam}) {
-					($counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'})?($counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'}++):($counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'}=1);	
+					($counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'})?
+					($counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'}++):($counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'}=1);	
 				}				
 				#Need to check if a feature is counted several times in the upper classes
 				$checkTE{$l[14]}{$cat}{$type}{'tot'}=1;
@@ -608,7 +728,7 @@ sub check_for_featured_overlap {
 				$checkTE{$l[14]}{$cat}{$type}{$Rcla.$Rfam}=1;
 				$checkTE{$l[14]}{$cat}{$type}{$Rcla.$Rfam.$Rnam}=1;
 				
-				#Age categories if any
+				#Age categories if any; only increment per exon & age category, not per TE
 				if ($age->{$Rnam}) {
 					unless ($checkTE{$l[14]}{'age'}) { #easier to load tot hit with these keys for the print_out sub
 						($counts->{$cat}{$type}{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'})?
@@ -616,17 +736,17 @@ sub check_for_featured_overlap {
 					}
 					unless ($checkTE{$l[14]}{$age->{$Rnam}[4]}) {
 						($counts->{$cat}{$type}{$fileid}{'age'}{'cat.1'}{$age->{$Rnam}[4]}{'tot'})?
-						($counts->{$cat}{$type}{$fileid}{'age'}{'cat.1'}{$age->{$cat}{$type}{$Rnam}[4]}{'tot'}++):($counts->{$cat}{$type}{$fileid}{'age'}{'cat.1'}{$age->{$Rnam}[4]}{'tot'}=1);
+						($counts->{$cat}{$type}{$fileid}{'age'}{'cat.1'}{$age->{$Rnam}[4]}{'tot'}++):($counts->{$cat}{$type}{$fileid}{'age'}{'cat.1'}{$age->{$Rnam}[4]}{'tot'}=1);
 					}
 					if (($age->{$Rnam}[5]) && (! $checkTE{$l[14]}{$age->{$Rnam}[5]})) {
 						($counts->{$cat}{$type}{$fileid}{'age'}{'cat.2'}{$age->{$Rnam}[5]}{'tot'})?
-						($counts->{$cat}{$type}{$fileid}{'age'}{'cat.2'}{$age->{$cat}{$type}{$Rnam}[5]}{'tot'}++):($counts->{$cat}{$type}{$fileid}{'age'}{'cat.2'}{$age->{$Rnam}[5]}{'tot'}=1);
+						($counts->{$cat}{$type}{$fileid}{'age'}{'cat.2'}{$age->{$Rnam}[5]}{'tot'}++):($counts->{$cat}{$type}{$fileid}{'age'}{'cat.2'}{$age->{$Rnam}[5]}{'tot'}=1);
 					}
 					$checkTE{$l[14]}{'age'}=1;
 					$checkTE{$l[14]}{$age->{$Rnam}[4]}=1;
 					$checkTE{$l[14]}{$age->{$Rnam}[5]}=1;
 				}
-			$counts->{$cat}{$type}{$fileid}{'age'}{'cat.2'}{'tot'}{'tot'}=$counts->{$cat}{$type}{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'};
+				$counts->{$cat}{$type}{$fileid}{'age'}{'cat.2'}{'tot'}{'tot'}=$counts->{$cat}{$type}{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'};
 			}	
 		}
 	}
@@ -700,7 +820,7 @@ sub print_stats {
 	my $no_boot_exons = get_exon_data($no_boot_tot_ex);
 	my $boot_exons = get_exon_data($boot_tot_ex);	
 			
-	#now print cat data
+	#now print
 	print_cat_data($no_boot,$no_boot_exons,$more,$boots,$boot_exons,$nboot,$out,$scriptname,$version);
 	print_rep_data($no_boot,$no_boot_exons,$more,$boots,$boot_exons,$nboot,$out,$parsedRM,$age,$scriptname,$version) if ($full eq "y");
 	return 1;
@@ -709,20 +829,23 @@ sub print_cat_data {
 	my ($no_boot,$no_boot_exons,$more,$boots,$boot_exons,$nboot,$out,$scriptname,$version) = @_;
 	#get the no_boot values, avg and sd
 	print STDERR "     Get data for each category of overlap\n";
-	my $obs = get_cat_data($no_boot,0,"na",$out);
-	my $exp = get_cat_data($boots,$nboot,$obs,$out);
+	my $obs = ();
+	$obs = get_cat_data($no_boot,0,"na",$out,$obs);
+	my $exp = initialize_cat_exp($obs); #0 values for all the ones seen in obs => so that even if not seen in exp, will be there
+	$exp = get_cat_data($boots,$nboot,$obs,$out,$exp);
 	
 	my $midval = $nboot/2;
 	open (my $fh, ">", $out.".cat.txt") or confess "ERROR (sub print_stats): can't open to write $out.cat.txt $!\n";	
 	print $fh "#Script $scriptname, v$version\n";
 	print $fh "#Aggregated results + stats\n";
-	print $fh "#With $more repetitions for obs (observed) and $nboot bootstraps for exp (expected)\n";
-	print $fh "sd = standard deviation; nb = number; avg = average\n";
-	print $fh "#The significance of the difference between observed and random is assessed with a permutation test (two-tailed):\n";
+	print $fh "#With $more repetitions for obs (observed) and $nboot bootstraps for exp (expected); sd = standard deviation; nb = number; len = length; avg = average\n";
+	print $fh "#Two tests are made (permutation and binomial) to assess how significant the difference between observed and random, so two pvalues are given\n";
+	print $fh "#For the two tailed permutation test:\n";
 	print $fh "#if rank is < $midval and pvalue is not \"ns\", there are significantly fewer observed values than expected \n";
-	print $fh "#if rank is > $midval and pvalue is not \"ns\", there are significantly higher observed values than expected \n";	
-	print $fh "#The category \"transcript\" corresponds to at least one feature hit per transcript\n";
-	print $fh "#For all categories besides \"transcript\", counts are of exons\n";
+	print $fh "#if rank is > $midval and pvalue is not \"ns\", there are significantly higher observed values than expected \n";
+	print $fh "#The binomial test is done with binom.test from R, two sided\n";
+	print $fh "#The category \"gene\" corresponds to the hit of at least one feature of any mature transcript of that gene\n";
+	print $fh "#For all categories besides \"gene\", counts are of exons\n";
 	print $fh "\n#trancript_type\tcagtegory_id\toverlap_category\tobs_mean\tobs_sd\t%_obs\tobs_tot\tobs_tot_sd\texp_mean\texp_sd\t%_exp\texp_tot\texp_tot_sd\t";
 	print $fh "obs_rank_in_exp\t2-tailed_permutation-test_pvalue(obs.vs.exp)\tsignificance\n\n";
 	my %o = ('TSS_polyA'=>0,
@@ -755,9 +878,11 @@ sub print_cat_data {
 sub print_rep_data {
 	my ($no_boot,$no_boot_exons,$more,$boots,$boot_exons,$nboot,$out,$parsedRM,$age,$scriptname,$version) = @_;
 	print STDERR "     Get data for each repeat, family and class (total and per category)\n";
-	my $te_obs = get_te_data($no_boot,0,"na",$parsedRM);	
-	my $te_exp = get_te_data($boots,$nboot,$te_obs,$parsedRM);
-	$te_exp = TEshuffle::binomial_test_R($te_exp,"tr_rep");
+	my $te_obs = ();
+	$te_obs = get_te_data($no_boot,0,"na",$parsedRM,$te_obs);	
+	my $te_exp = initialize_te_exp($te_obs); #0 values for all the ones seen in obs => so that even if not seen in exp, will be there
+	$te_exp = get_te_data($boots,$nboot,$te_obs,$parsedRM,$te_exp);
+	$te_exp = TEshuffle::binomial_test_R($te_exp,"tr");
 	my $midval = $nboot/2;
 	open (my $fh, ">", $out.".TE.txt") or confess "ERROR (sub print_stats): can't open to write $out.TEs.txt $!\n";	
 	print $fh "#Script $scriptname, v$version\n";
@@ -794,18 +919,20 @@ sub print_rep_data {
 						my $te_expavg = $te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'avg'};	
 						$te_expper = $te_expavg/$boot_exons->{$type}{'avg'}*100 unless ($te_expavg == 0);
 						#stats
-						my $pval_nb = $te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'pval'};		
-						$pval_nb = "na" if (($te_expavg == 0) && ($te_obsnb == 0));									
+						my $pval = $te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'pval'};		
+						$pval = "na" if (($te_expavg == 0) && ($te_obsnb == 0));									
 						#Now print stuff
 						print $fh "$type\t$cat\t$Rclass\t$Rfam\t$Rname\t";
 						print $fh "$te_obsnb\t$te_obssd\t$te_obsper\t$no_boot_exons->{$type}{'avg'}\t$no_boot_exons->{$type}{'sd'}\t"; 
 						print $fh "$parsedRM->{$Rclass}{$Rfam}{$Rname}\t"; 
 						print $fh "$te_expavg\t$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'sd'}\t$te_expper\t$boot_exons->{$type}{'avg'}\t$boot_exons->{$type}{'sd'}\t";			
-						my $sign = TEshuffle::get_sign($pval_nb);				
-						print $fh "$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'rank'}\t$pval_nb\t$sign\t";
+						my $sign = TEshuffle::get_sign($pval);				
+						print $fh "$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'rank'}\t$pval\t$sign\t";
 						#Binomial
+				        $sign = "nd"; #reinitialize
 						$sign = TEshuffle::get_sign($te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_pval'});
-						print $fh "$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_prob'}\t$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_conf'}\t$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_pval'}\t$sign\n";	
+						print $fh "$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_prob'}\t$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_conf'}";
+						print $fh "\t$te_exp->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}{'binom_pval'}\t$sign\n";	
 					}
 				}		
 			}
@@ -835,14 +962,34 @@ sub get_exon_data {
 }
 
 #-----------------------------------------------------------------------------
+# Initialize the exp hash with the obs data, so that there will be 0s
+# $exp = initialize_cat_exp($obs);
+#-----------------------------------------------------------------------------
+sub initialize_cat_exp {
+	my $obs = shift;
+	my $exp = ();
+	#obs:
+	#$cat_data->{$cat}{$type}{'pval'}
+	foreach my $k1 (keys %{$obs}) {
+		foreach my $k2 (keys %{$obs->{$k1}}) {
+			foreach my $k3 (keys %{$obs->{$k1}{$k2}}) {
+				$exp->{$k1}{$k2}{$k3}{'avg'}=0;
+				$exp->{$k1}{$k2}{$k3}{'sd'}=0;
+				$exp->{$k1}{$k2}{$k3}{'rank'}="na";
+				$exp->{$k1}{$k2}{$k3}{'pval'}="na";
+			}
+		}
+	}
+	return $exp;
+}
+
+#-----------------------------------------------------------------------------
 # Get data for each category + for repeats; separate them just for clarity
-# my $obs = get_cat_data($no_boot,0,"na",$out);
-# my $exp = get_cat_data($boots,$nboot,$obs,$out);
+# $obs = get_cat_data($no_boot,0,"na",$out,$obs);
+# $exp = get_cat_data($boots,$nboot,$obs,$out,$exp);
 #-----------------------------------------------------------------------------
 sub get_cat_data {
-# $counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'nr'}
-	my ($all_data,$n,$obs,$out) = @_;
-	my %cat_data = ();
+	my ($all_data,$n,$obs,$out,$cat_data) = @_;
 	foreach my $cat (keys %{$all_data}) {
 		foreach my $type (keys %{$all_data->{$cat}}) {
 			my @data = ();
@@ -851,8 +998,8 @@ sub get_cat_data {
 				$hits = 0 unless ($hits);
 				push(@data,$hits);	
 			}
-			#get average and standard deviation from @data			
-			($cat_data{$cat}{$type}{'avg'},$cat_data{$cat}{$type}{'sd'}) = TEshuffle::get_avg_and_sd(\@data);
+			#get average and standard deviation from @data
+			($cat_data->{$cat}{$type}{'avg'},$cat_data->{$cat}{$type}{'sd'}) = TEshuffle::get_avg_and_sd(\@data);
 				
 			#Now get he rank of the observed value in the list of expected => get a p value
 			unless ($n == 0) {
@@ -864,30 +1011,55 @@ sub get_cat_data {
 					last EXP if ($exp > $obs->{$cat}{$type}{'avg'});
 					$rank++ if ($exp < $obs->{$cat}{$type}{'avg'});
 				}
-				$cat_data{$cat}{$type}{'rank'}=$rank;
+				$cat_data->{$cat}{$type}{'rank'}=$rank;
 				if ($rank <= $nboot/2) {
-					$cat_data{$cat}{$type}{'pval'}=$rank/$nboot*2; #*2 because 2 tailed
+					$cat_data->{$cat}{$type}{'pval'}=$rank/$nboot*2; #*2 because 2 tailed
 				} else {
-					$cat_data{$cat}{$type}{'pval'}=($nboot+2-$rank)/$nboot*2;  #+2 so it is symetrical (around nboot+1)
+					$cat_data->{$cat}{$type}{'pval'}=($nboot+2-$rank)/$nboot*2;  #+2 so it is symetrical (around nboot+1)
 				}			
 			}
 		}
 	}
-	return(\%cat_data);
+	return($cat_data);
+}
+
+#-----------------------------------------------------------------------------
+# Initialize the exp hash with the obs data, so that there will be 0s
+# my $te_exp = initialize_te_exp($te_obs);
+#-----------------------------------------------------------------------------
+sub initialize_te_exp {
+	my $obs = shift;
+	my $exp = ();
+	#obs:
+	#$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'rank'};
+	foreach my $c (keys %{$obs}) {
+		foreach my $t (keys %{$obs->{$c}}) {
+			foreach my $k1 (keys %{$obs->{$c}{$t}}) {
+				foreach my $k2 (keys %{$obs->{$c}{$t}{$k1}}) {
+					foreach my $k3 (keys %{$obs->{$c}{$t}{$k1}{$k2}}) {
+						$exp->{$c}{$t}{$k1}{$k2}{$k3}{'avg'}=0;
+						$exp->{$c}{$t}{$k1}{$k2}{$k3}{'sd'}=0;
+						$exp->{$c}{$t}{$k1}{$k2}{$k3}{'rank'}="na";
+						$exp->{$c}{$t}{$k1}{$k2}{$k3}{'pval'}="na";
+					}
+				}
+			}
+		}	
+	}		
+	return $exp;
 }
 
 #-----------------------------------------------------------------------------
 # Get the stats values for each repeats now -> includes binomial
-# my $te_obs = get_te_data($no_boot,0,"na",$parsedRM);
-# my $te_exp = get_te_data($boots,$nboot,$te_obs,$parsedRM);
+# $te_obs = get_te_data($no_boot,0,"na",$parsedRM,$te_obs);
+# $te_exp = get_te_data($boots,$nboot,$te_obs,$parsedRM,$te_exp);
 #-----------------------------------------------------------------------------
 sub get_te_data {
-	my ($counts,$nboot,$te_obs,$parsedRM) = @_;
+	my ($counts,$nboot,$te_obs,$parsedRM,$te_data) = @_;
 	# $counts->{$cat}{$type}{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}
 	# $counts->{$cat}{$type}{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'}
 	# $counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'}
 	# $counts->{$cat}{$type}{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'}
-	my $te_data = ();
 
 	#agregate data [I could easily have the categories details here, so put them; so I can compare]
 	my ($nb_c,$nb_f,$nb_r,$nb_a1,$nb_a2) = ();
@@ -901,8 +1073,10 @@ sub get_te_data {
 						push(@{$nb_f->{$cat}{$type}{$Rclass}{$Rfam}{'tot'}},$counts->{$cat}{$type}{$round}{$Rclass}{$Rfam}{'tot'}{'tot'}) if ($Rclass ne "age");		
 						foreach my $Rname (keys %{$counts->{$cat}{$type}{$round}{$Rclass}{$Rfam}}) {
 							push(@{$nb_r->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}},$counts->{$cat}{$type}{$round}{$Rclass}{$Rfam}{$Rname}{'tot'});
-							push(@{$nb_a1->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}},$counts->{$cat}{$type}{$round}{$Rclass}{$Rfam}{$Rname}{'tot'}) if (($Rclass eq "age") && ($Rfam eq "cat.1"));
-							push(@{$nb_a2->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}},$counts->{$cat}{$type}{$round}{$Rclass}{$Rfam}{$Rname}{'tot'}) if (($Rclass eq "age") && ($Rfam eq "cat.2"));
+							push(@{$nb_a1->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}},$counts->{$cat}{$type}{$round}{$Rclass}{$Rfam}{$Rname}{'tot'}) 
+								if (($Rclass eq "age") && ($Rfam eq "cat.1"));
+							push(@{$nb_a2->{$cat}{$type}{$Rclass}{$Rfam}{$Rname}},$counts->{$cat}{$type}{$round}{$Rclass}{$Rfam}{$Rname}{'tot'}) 
+								if (($Rclass eq "age") && ($Rfam eq "cat.2"));
 						}
 					}
 				}
@@ -915,13 +1089,17 @@ sub get_te_data {
 		foreach my $type (keys %{$counts->{$cat}}) {
 			foreach my $round (keys %{$counts->{$cat}{$type}}) {
 				foreach my $Rclass (keys %{$counts->{$cat}{$type}{$round}}) {
-					$te_data = get_te_data_details($cat,$type,$Rclass,"tot","tot",$nb_c->{$cat}{$type}{$Rclass}{'tot'}{'tot'},$te_data,$te_obs,$nboot,$parsedRM) if ($Rclass ne "age");	
+					$te_data = get_te_data_details($cat,$type,$Rclass,"tot","tot",$nb_c->{$cat}{$type}{$Rclass}{'tot'}{'tot'},$te_data,$te_obs,$nboot,$parsedRM) 
+						if ($Rclass ne "age");	
 					foreach my $Rfam (keys %{$counts->{$cat}{$type}{$round}{$Rclass}}) {
-						$te_data = get_te_data_details($cat,$type,$Rclass,$Rfam,"tot",$nb_f->{$cat}{$type}{$Rclass}{$Rfam}{'tot'},$te_data,$te_obs,$nboot,$parsedRM) if ($Rclass ne "age");	
+						$te_data = get_te_data_details($cat,$type,$Rclass,$Rfam,"tot",$nb_f->{$cat}{$type}{$Rclass}{$Rfam}{'tot'},$te_data,$te_obs,$nboot,$parsedRM) 
+							if ($Rclass ne "age");	
 						foreach my $Rname (keys %{$counts->{$cat}{$type}{$round}{$Rclass}{$Rfam}}) {
 							$te_data = get_te_data_details($cat,$type,$Rclass,$Rfam,$Rname,$nb_r->{$cat}{$type}{$Rclass}{$Rfam}{$Rname},$te_data,$te_obs,$nboot,$parsedRM);
-							$te_data = get_te_data_details($cat,$type,$Rclass,$Rfam,$Rname,$nb_a1->{$cat}{$type}{$Rclass}{$Rfam}{$Rname},$te_data,$te_obs,$nboot,$parsedRM) if (($Rclass eq "age") && ($Rfam eq "cat.1"));
-							$te_data = get_te_data_details($cat,$type,$Rclass,$Rfam,$Rname,$nb_a2->{$cat}{$type}{$Rclass}{$Rfam}{$Rname},$te_data,$te_obs,$nboot,$parsedRM) if (($Rclass eq "age") && ($Rfam eq "cat.2"));
+							$te_data = get_te_data_details($cat,$type,$Rclass,$Rfam,$Rname,$nb_a1->{$cat}{$type}{$Rclass}{$Rfam}{$Rname},$te_data,$te_obs,$nboot,$parsedRM) 
+								if (($Rclass eq "age") && ($Rfam eq "cat.1"));
+							$te_data = get_te_data_details($cat,$type,$Rclass,$Rfam,$Rname,$nb_a2->{$cat}{$type}{$Rclass}{$Rfam}{$Rname},$te_data,$te_obs,$nboot,$parsedRM) 
+								if (($Rclass eq "age") && ($Rfam eq "cat.2"));
 						}
 					}
 				}		
@@ -940,10 +1118,22 @@ sub get_te_data {
 #-----------------------------------------------------------------------------	
 sub get_te_data_details {
 	my ($cat,$type,$key1,$key2,$key3,$agg_data,$te_data,$te_obs,$nboot,$parsedRM) = @_;	
-	#get average and sd of the expected
-	($te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'avg'},$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'sd'}) = TEshuffle::get_avg_and_sd($agg_data);
+	#get average and sd of the expected	
+
+
+
+
+
 	
-	if ($nboot > 0) {
+	print STDERR "{$cat}{$type}{$key1}{$key2}{$key3} => @{$agg_data}\n";
+
+
+
+
+
+	
+	($te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'avg'},$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'sd'}) = TEshuffle::get_avg_and_sd($agg_data);		
+	if ($nboot > 0) {	
 		my $observed = $te_obs->{$cat}{$type}{$key1}{$key2}{$key3}{'avg'};		
 #		print STDERR "FYI: no observed value for {$cat}{'no_boot'}{$key1}{$key2}{$key3}{'tot'}\n" unless ($observed);
 		$observed = 0 unless ($observed);				
@@ -960,17 +1150,18 @@ sub get_te_data_details {
 		} else {
 			$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'pval'}=($nboot+2-$rank)/$nboot*2;  #+2 so it is symetrical (around nboot+1)
 		}
-		
+				
 		#Binomial test
 		#get all the values needed for binomial test in R => do them all at once
-		my $n = $parsedRM->{$key1}{$key2}{$key3};
+		my $n = $parsedRM->{$key1}{$key2}{$key3} if ($parsedRM->{$key1}{$key2}{$key3});
 		$n = 0 unless ($n);
-		print STDERR "        WARN: no value for total number (from parsed RM table), for {$key1}{$key2}{$key3}? => no binomial test\n" if ($n == 0);
 		my $p = 0;		
 		$p=$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'avg'}/$n unless ($n == 0); #should not happen, but could
 		$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'p'} = $p;
 		$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'n'} = $n;
-		$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'x'} = $observed;
+		#x cannot be non integer - round to closest int
+		my $rounded = sprintf "%.0f", $observed;
+		$te_data->{$cat}{$type}{$key1}{$key2}{$key3}{'x'} = $rounded;
 	}
 	return($te_data);
 }
