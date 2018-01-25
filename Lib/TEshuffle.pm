@@ -5,7 +5,7 @@
 # => defined as TEshuffle package
 ######################################################
 package TEshuffle;
-use Data::Dumper;
+#use Data::Dumper;
 use strict;
 use warnings;
 use Carp;
@@ -288,6 +288,7 @@ sub getparsedRM {
 sub getparsedRMline {
 	my ($parsed,$l,$age,$rm,$rm_c,$stype) = @_;
 	my ($Rname,$classfam) = ($l->[9],$l->[10]);
+	$Rname =~ s/\//_/; #making sure no / in repeat name
 	my ($Rclass,$Rfam) = get_Rclass_Rfam($Rname,$classfam);
 	#now feed dictionary
 	($parsed->{'tot'}{'tot'}{'tot'})?($parsed->{'tot'}{'tot'}{'tot'}++):($parsed->{'tot'}{'tot'}{'tot'}=1);
@@ -603,14 +604,16 @@ sub binomial_test_R {
 		foreach my $k1 (keys %{$exp}) { 	
 			foreach my $k2 (keys %{$exp->{$k1}}) {			
 				KEY: foreach my $k3 (keys %{$exp->{$k1}{$k2}}) {
-					my ($x,$n,$p) = ($exp->{$k1}{$k2}{$k3}{'x'},$exp->{$k1}{$k2}{$k3}{'n'},$exp->{$k1}{$k2}{$k3}{'p'});
+					my $x = $exp->{$k1}{$k2}{$k3}{'x'};
+					my $n = $exp->{$k1}{$k2}{$k3}{'n'};
+					my $p = $exp->{$k1}{$k2}{$k3}{'p'};
 					#set values
-					($exp->{$k1}{$k2}{$k3}{'binom_prob'},$exp->{$k1}{$k2}{$k3}{'binom_conf'},$exp->{$k1}{$k2}{$k3}{'binom_pval'}) = ("na","na","na");
-					next KEY if ($p == 0);
-					print STDERR "        WARN: no value for total number (from parsed RM table), for {$k1}{$k2}{$k3}? => no binomial test\n" if ($n == 0);
-					next KEY if ($n == 0);								
-					print STDERR "        WARN: expected overlaps (avg) > total number (from parsed RM table), for {$k1}{$k2}{$k3}, likely due to multiple peaks overlapping with the repeat => no binomial test\n" if ($p > 1);				
-					next KEY if ($p > 1);								
+					$exp->{$k1}{$k2}{$k3}{'binom_prob'} = "na"; 
+					$exp->{$k1}{$k2}{$k3}{'binom_conf'} = "na";
+					$exp->{$k1}{$k2}{$k3}{'binom_pval'} = "na";					
+					#check now
+					my $skip = check_binom_values($k1,$k2,$k3,$x,$p,$n);
+					next KEY if ($skip eq "y");
 					$R->send(qq`d<-binom.test($x,$n,$p,alternative="two.sided")`);				
 					my $data = $R->get('d');		
 					my @data = @{$data};
@@ -636,10 +639,8 @@ sub binomial_test_R {
 							$exp->{$cat}{$t}{$k1}{$k2}{$k3}{'binom_conf'} = "na";
 							$exp->{$cat}{$t}{$k1}{$k2}{$k3}{'binom_pval'} = "na";
 							#check now
-#							print STDERR "        WARN: expected was 0 for {$cat}{$t}{$k1}{$k2}{$k3} => no binomial test\n" if (! $n) || ($n == 0);
-							next KEY if (! $n) || ($n == 0);								
-							print STDERR "        WARN: expected overlaps (avg) > total number (from parsed RM table), for {$cat}{$t}{$k1}{$k2}{$k3}, likely due to multiple peaks overlapping with the repeat => no binomial test\n" if ($p > 1);				
-							next KEY if ($p > 1);			
+							my $skip = check_binom_values($k1,$k2,$k3,$x,$p,$n);
+							next KEY if ($skip eq "y");
 							$R->send(qq`d<-binom.test($x,$n,$p,alternative="two.sided")`);				
 							my $data = $R->get('d');		
 							my @data = @{$data};
@@ -658,6 +659,27 @@ sub binomial_test_R {
 	return($exp);
 }
 
+#-----------------------------------------------------------------------------
+# check the x, n and p values & print warnings
+#-----------------------------------------------------------------------------
+sub check_binom_values {
+	my ($k1,$k2,$k3,$x,$p,$n) = @_;
+	my $skip = "n";
+	return("y") if ($p == 0);
+	if (! $n || $n == 0) {
+		print STDERR "        WARN: no value for total number (from parsed RM table), for {$k1}{$k2}{$k3}? => no binomial test\n";
+		$skip = "y";
+	}
+	if ($p > 1) {
+		print STDERR "        WARN: expected overlaps (avg) > total number (from parsed RM table) for {$k1}{$k2}{$k3}, likely due to multiple peaks overlapping with the repeat => no binomial test\n";
+		$skip = "y";
+	}
+	if ($n < $x) {
+		print STDERR "        WARN: we should have n > x but n = $n and x = $x for {$k1}{$k2}{$k3}, likely due to multiple peaks overlapping with the repeat => no binomial test\n";
+		$skip = "y";
+	}
+	return $skip;
+}
 
 #ensure last returned value is true (to load as require in scripts)
 1;
