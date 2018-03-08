@@ -26,46 +26,49 @@ use TEshuffle;
 #flush buffer
 $| = 1;
 
-my $VERSION = "4.3";
+my $VERSION = "4.4";
 my $SCRIPTNAME = "TE-analysis_Shuffle_bed.pl";
 my $CHANGELOG;
 set_chlog();
 sub set_chlog {
 $CHANGELOG = "
-#	- v1.0 = Mar 2016 
-#            based on TE-analysis_Shuffle_v3+.pl, v3.3, 
-#            but adapted to more general input files = bed file corresponding to any features to test.
-#	- v2.0 = Mar 2016 
-#            attempt of making this faster by removing any length info and allowing overlaps 
-#            of shuffled features (since they are independent tests, it's OK)
-#            Also added the possibility of several files to -e and -i
-#   - v2.1 = Oct 2016
-#            remove empty column of length info from output
-#            get enrichment by age categories if age file provided
-#            bug fix for total counts of hit features when upper levels (by class or family, by Rname was probably OK)
-#            Changes in stats, bug fix; use R for the binomial test
-#	- v3.0 = Oct 25 2016
-#            TEshuffle.pm for subroutines shared with the shuffle_tr script
-#	- v4.0 = Nov 28 2016
-#            different choices to shuffle the TEs:
-#               shufflebed = completely random positions, but same chromosome
-#               shuffle inside the current TE positions, same chromosome
-#               shuffle each TE, keeping its distance to a TSS, same chromosome - thanks to: Cedric Feschotte, Ed Chuong
-#            make subfolders for each input file (for the shuffled outputs)
-#	- v4.1 = Nov 30 2016
-#            Minor bug fix: when random was 0, values were not reported 
-#            (still interesting to see them in the obs, even if no stats possible)
-#	- v4.2 = Dec 01 2017
-#            Bug fix for when long TEs were shuffled to the position of small TEs that are
-#               too close to the start of the genomic sequence (led to negative starts).
-#               This is now checked for -s rm and -s tss:
-#                  for -s rm, the TE is shifted of as many bp as needed
-#                  for -s tss the start is simply changed to 1 (to avoid having a TE placed closer to a tss)
-#            Also added the option to use -r file in -s rm as well (to check ends) and chift the TE if needed.
-#	- v4.3 = Jan 23 2018
-#            Avoid passing to subs variables that don't need to + use upercase syntax
-#            Cleaned up a few things
-#            Bug fix for cases when the 4th col of the bed file is not a unique ID => identifier is now a cat of cols 1 to 4
+#  - v1.0 = Mar 2016 
+#           based on TE-analysis_Shuffle_v3+.pl, v3.3, 
+#           but adapted to more general input files = bed file corresponding to any features to test.
+#  - v2.0 = Mar 2016 
+#           attempt of making this faster by removing any length info and allowing overlaps 
+#           of shuffled features (since they are independent tests, it's OK)
+#           Also added the possibility of several files to -e and -i
+#  - v2.1 = Oct 2016
+#           remove empty column of length info from output
+#           get enrichment by age categories if age file provided
+#           bug fix for total counts of hit features when upper levels (by class or family, by Rname was probably OK)
+#           Changes in stats, bug fix; use R for the binomial test
+#  - v3.0 = Oct 25 2016
+#           TEshuffle.pm for subroutines shared with the shuffle_tr script
+#  - v4.0 = Nov 28 2016
+#           different choices to shuffle the TEs:
+#             shufflebed = completely random positions, but same chromosome
+#             shuffle inside the current TE positions, same chromosome
+#             shuffle each TE, keeping its distance to a TSS, same chromosome - thanks to: Cedric Feschotte, Ed Chuong
+#           make subfolders for each input file (for the shuffled outputs)
+#  - v4.1 = Nov 30 2016
+#           Minor bug fix: when random was 0, values were not reported 
+#           (still interesting to see them in the obs, even if no stats possible)
+#  - v4.2 = Dec 01 2017
+#           Bug fix for when long TEs were shuffled to the position of small TEs that are
+#             too close to the start of the genomic sequence (led to negative starts).
+#             This is now checked for -s rm and -s tss:
+#               for -s rm, the TE is shifted of as many bp as needed
+#               for -s tss the start is simply changed to 1 (to avoid having a TE placed closer to a tss)
+#           Also added the option to use -r file in -s rm as well (to check ends) and chift the TE if needed.
+#  - v4.3 = Jan 23 2018
+#           Avoid passing to subs variables that don't need to + use upercase syntax
+#           Cleaned up a few things
+#           Bug fix for cases when the 4th col of the bed file is not a unique ID => identifier is now a cat of cols 1 to 4
+#  - v4.4 = Mar 08 2018
+#           Minor changes in logs and check options
+#           Was assuming a 5 columns bed file => fix
 \n";
 	return 1;
 }
@@ -131,12 +134,13 @@ Synopsis (v$VERSION):
                               See -l and -t for filters, and -g for age data       
     -s,--shuffle  => (STRING) Shuffling type. Should be one of the following:
                                -s bed  => use bedtools shuffle, random position on the same chromosome
-                               -s rm   => shuffle inside the current TE positions; still random, but less
+                               -s rm   => shuffle inside the current TE positions; still random, but less; also, with this
+                                          the stats won't be affected with overall depletion or enrichment of TEs in the -f file
                                -s tss  => shuffle the TEs on the same chromosome keeping their distance
                                           to the closest TSS of an annotation file provided
                                           (TSS are shuffled and then assigned to a TE; 
-                                          same TSS will be assigned multiple TEs if fewer TSS than TEs)
-                                          thanks to: Cedric Feschotte and Edward Chuong for the idea
+                                          same TSS will be assigned multiple TEs if fewer TSS than TEs).
+                                          Thanks to: Edward Chuong & Cedric Feschotte for the suggestion
 
    MANDATORY ARGUMENTS IF USING -s tss:
     -a,--annot    => (STRING) gtf or gff; annotations to load all unique TSS: will be used to set the distance
@@ -270,16 +274,20 @@ sub check_options {
 	die "\n -q $SHUFFLE is not in a proper format? (not .out, .bed, .gff or .gff3)\n\n" unless ($SHUFFLE =~ /\.out$/ || $SHUFFLE =~ /\.bed$/ || $SHUFFLE =~ /\.gff$/ || $SHUFFLE =~ /\.gff3$/);
 	die "\n -q $SHUFFLE does not exist?\n\n" if (! -e $SHUFFLE);
 	die "\n -s $STYPE should be one of the following: bed, rm or tss\n\n" if ($STYPE ne "bed" && $STYPE ne "rm" && $STYPE ne "tss");
+
 	#deal with conditional mandatory stuff
-	die "\n -s tss was set, but -a is missing?\n\n" if ($STYPE eq "tss" && ! $TSSFILE);
-	die "\n -a $TSSFILE does not exist?\n\n" if ($TSSFILE && ! -e $TSSFILE);
-	if ($STYPE eq "bed") {
+	if ($STYPE eq "tss") {
+		die "\n -s tss was set, but -a is missing?\n\n" if (! $TSSFILE);
+		die "\n -a $TSSFILE does not exist?\n\n" if ($TSSFILE && ! -e $TSSFILE);	
+		die "\n -r $BUILD does not exist?\n\n" if (! -e $BUILD);
+	} elsif ($STYPE eq "bed") {
 		die "\n -s bed was set, but -r is missing?\n\n" if (! $BUILD);
 		die "\n -s bed was set, but -e is missing?\n\n" if (! $EXCLUDE);
 		die "\n -r $BUILD does not exist?\n\n" if (! -e $BUILD);
 		die "\n -e $EXCLUDE does not exist?\n\n" if ($EXCLUDE !~ /,/ && ! -e $EXCLUDE); #if several files, can't check existence here
 		die "\n -i $INCL does not exist?\n\n" if ($INCL ne "na" && $INCL !~ /,/ && ! -e $INCL); #if several files, can't check existence here
 	}
+
 	#Now the rest
 	die "\n -n $NBOOT but should be an integer\n\n" if ($NBOOT !~ /\d+/);
 	die "\n -i $INTERS but should be an integer\n\n" if ($INTERS !~ /\d+/);
@@ -358,7 +366,7 @@ if ($TEAGE ne "na") {
 print STDERR " --- checking file in -s, print in .bed if not a .bed or gff file\n";
 print STDERR "     filtering TEs based on filter ($FILTER) and non TE behavior ($NONTE)\n" unless ($FILTER eq "na");
 print STDERR "     + getting genomic counts for each repeat\n";
-print STDERR "     + load all TE positions in a hash (since $STYPE is set to rm)\n" if ($STYPE eq "rm") ;
+print STDERR "     + load all TE positions in a hash (since -s is set to rm)\n" if ($STYPE eq "rm") ;
 my ($TOSHUFF_F,$PARSEDRM,$RM,$RM_C) = TEshuffle::RMtobed($SHUFFLE,$OKSEQ,$FILTER,$F_REGEX,$NONTE,$AGE,"y",$STYPE); #Note: $RM and $RM_C are empty unless $STYPE eq rm
 
 #prep steps if shuffling type is tss
@@ -475,7 +483,7 @@ sub check_for_overlap {
 	#   check_for_overlap("$TEMP/no_boot.joined","no_boot",$OUT,$INTERS,$AGE);
 	#   $BOOTS = check_for_overlap("$TEMP/boot.$i.joined","boot.".$i,$OUTB,$INTERS,$AGE,$BOOTS);
 	my ($file,$fileid,$out,$counts) = @_;
-	my $check = ();
+	my %check = ();
 	open(my $fh, "<$file") or confess "\n   ERROR (sub check_for_overlap): could not open to read $file!\n";
 	LINE: while(<$fh>){
 		chomp(my $l = $_);
@@ -487,45 +495,51 @@ sub check_for_overlap {
 		my $Rnam = $rm[9];
 		$Rnam =~ s/\//_/; #making sure no / in repeat name
 		my ($Rcla,$Rfam) = TEshuffle::get_Rclass_Rfam($Rnam,$rm[10]);
-		my $id = $l[9]."#".$l[6]."#".$l[7]."#".$l[8]."#".$l[11];
+		my $id = $l[9]."#".$l[6]."#".$l[7]."#".$l[8];
+		$id = $id."#".$l[11] if ($l[11]);
 		
 		#Increment in the data structure, but only if feature not already counted for this category
-		unless ($check->{$id}{'tot'}) {
+		unless ($check{$id}{'tot'}) {
 			$counts->{$fileid}{'tot'}{'tot'}{'tot'}{'tot'}++;
 		}
-		unless ($check->{$id}{$Rcla}) {
+		unless ($check{$id}{$Rcla}) {
 			$counts->{$fileid}{$Rcla}{'tot'}{'tot'}{'tot'}++;	
 		}
-		unless ($check->{$id}{$Rcla.$Rfam}) {
+		unless ($check{$id}{$Rcla.$Rfam}) {
 			$counts->{$fileid}{$Rcla}{$Rfam}{'tot'}{'tot'}++;
 		}
-		unless ($check->{$id}{$Rcla.$Rfam.$Rnam}) {
+		unless ($check{$id}{$Rcla.$Rfam.$Rnam}) {
 			$counts->{$fileid}{$Rcla}{$Rfam}{$Rnam}{'tot'}++;	
 		}
 						
 		#Need to check if a feature is counted several times in the upper classes
-		$check->{$id}{'tot'}=1;
-		$check->{$id}{$Rcla}=1;
-		$check->{$id}{$Rcla.$Rfam}=1;
-		$check->{$id}{$Rcla.$Rfam.$Rnam}=1;
+		$check{$id}{'tot'}=1;
+		$check{$id}{$Rcla}=1;
+		$check{$id}{$Rcla.$Rfam}=1;
+		$check{$id}{$Rcla.$Rfam.$Rnam}=1;
 		
 		#Now, age categories if any
-		my $cat1 = $AGE->{$Rnam}[4];
-		my $cat2 = $AGE->{$Rnam}[5];
-		if ($AGE->{$Rnam}) {
-			unless ($check->{$id}{'age'}) { #easier to load tot hit with these keys for the print_out sub
-				$counts->{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'}++; 
-				$counts->{$fileid}{'age'}{'cat.2'}{'tot'}{'tot'}++;
+		if ($TEAGE) {
+			if ($AGE->{$Rnam}) {
+				my $cat1 = $AGE->{$Rnam}[4];
+				my $cat2 = $AGE->{$Rnam}[5];
+				unless ($check{$id}{'age'}) { #easier to load tot hit with these keys for the print_out sub
+					$counts->{$fileid}{'age'}{'cat.1'}{'tot'}{'tot'}++; 
+					$counts->{$fileid}{'age'}{'cat.2'}{'tot'}{'tot'}++;
+				}
+				unless ($check{$id}{$cat1}) {
+					$counts->{$fileid}{'age'}{'cat.1'}{$cat1}{'tot'}++;
+				}
+				if ($cat2 && ! $check{$id}{$cat2}) {
+					$counts->{$fileid}{'age'}{'cat.2'}{$cat2}{'tot'}++;
+				}
+				$check{$id}{'age'}=1;
+				$check{$id}{$cat1}=1;
+				$check{$id}{$cat2}=1;		
+			} else {
+				print STDERR "        WARN: $Rnam not in $TEAGE?\n" unless ($check{$Rnam});
+				$check{$Rnam} = 1;
 			}
-			unless ($check->{$id}{$cat1}) {
-				$counts->{$fileid}{'age'}{'cat.1'}{$cat1}{'tot'}++;
-			}
-			if ($cat2 && ! $check->{$id}{$cat2}) {
-				$counts->{$fileid}{'age'}{'cat.2'}{$cat2}{'tot'}++;
-			}
-			$check->{$id}{'age'}=1;
-			$check->{$id}{$cat1}=1;
-			$check->{$id}{$cat2}=1;		
 		}
 	}
 	close ($fh);		
