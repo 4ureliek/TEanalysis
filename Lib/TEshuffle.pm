@@ -458,9 +458,11 @@ sub fisher_yates_shuffle { #http://www.perlmonks.org/?node_id=1869
 #-----------------------------------------------------------------------------
 sub correct_coords {
 	my ($st,$en,$max,$te,$dist,$tss,$len) = @_;
-
+	my ($pst,$pen) = ($st,$en);
 	#first, kick it on the other side if it was a tss and super far away (otherwise better to shift)
 	if ($tss) {
+		print STDERR "     WARN: distance to TSS is so large ($dist nt) that once randomized this TE: $te\n";
+		print STDERR "           got out of the sequence (st=$pst and en=$pen) => placed on the other side of the tss\n";		
 		if ($en < 0) {
 			$st = $tss+abs($dist);
 			$en = $tss+abs($dist)+$len;
@@ -469,9 +471,12 @@ sub correct_coords {
 			$st = $tss-abs($dist)-$len;
 			$en = $tss-abs($dist);	
 		}
+		print STDERR "           but that was still out, so was shifted to be inside the scaffold/chromosome\n" if ($st < 0 || $en > $max);
+	} else {
+		print STDERR "     WARN: TE might be quite large ($te) that once randomized the start ($st) or end ($en) were out of the chromosome\n";
+		print STDERR "           => was shifted to be inside the scaffold/chromosome\n";
 	}
 	#Now keep going if st or en are still out
-	my $ifshifted = 1 if ($st < 0 || $en > $max);
 	if ($st < 0) {
 		my $shift = -$st; #put back in positive
 		$st = $st+$shift+1;
@@ -482,14 +487,6 @@ sub correct_coords {
 		$st = $st-$shift;
 		$en = $max;
 	}		
-	if ($tss) {
-		print STDERR "     WARN: distance to TSS is so large ($dist nt) that once randomized this TE: $te\n";
-		print STDERR "           got out of the sequence (st=$st and en=$en) => placed on the other side of the tss\n";		
-		print STDERR "           but that was still out, so was shifted to be inside the scaffold/chromosome\n" if ($ifshifted);
-	} else {		
-		print STDERR "     WARN: TE might be quite large ($te) that once randomized the start ($st) or end ($en) were out of the chromosome\n";
-		print STDERR "           => was shifted to be inside the scaffold/chromosome\n";
-	}	
 	return ($st,$en);
 }	
 
