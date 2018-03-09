@@ -11,18 +11,12 @@ use warnings;
 use Carp;
 
 #----------------------------------------------------------------------------
-# get a filename from a full path
-# my $genone_name = DelGet::filename($genone);
-#----------------------------------------------------------------------------
 sub filename {
 	my($name) = shift;
 	$name =~ s/.*\/(.*)$/$1/;
 	return $name;
 }
 
-#-----------------------------------------------------------------------------
-# Get build if needed and get chromosomes included in it
-# my ($okseq,$build_file) = TEshuffle::load_build($build,$dobuild);
 #-----------------------------------------------------------------------------
 sub load_build{ 
     my ($file,$dobuild) = @_;
@@ -56,9 +50,6 @@ sub load_build{
 }
 
 #-----------------------------------------------------------------------------
-# loading assembly gaps
-# my $excl = TEshuffle::load_gap($gaps,$dogaps);
-#-----------------------------------------------------------------------------
 sub load_gap {
     my ($file,$dogaps) = @_;
     my $bed;  
@@ -86,9 +77,6 @@ sub load_gap {
     return ($bed);
 }
 
-#-----------------------------------------------------------------------------
-# printing assembly gaps if needed, in bed format
-# $file = TEshuffle::print_gap($file) if ($ifbuild eq "n");
 #-----------------------------------------------------------------------------
 sub print_gap_bed {
 	my $file = shift;
@@ -124,10 +112,6 @@ sub print_gap_bed {
 }
 
 #-----------------------------------------------------------------------------
-# Concatenate files with cat
-# my $excl = concat_beds(\@exclude) if ($exclude =~ /,/);
-# $incl = TEshuffle::concat_beds(\@include);
-#-----------------------------------------------------------------------------
 sub concat_beds {
 	my $files = shift;
 	my $concat = $files->[0].".cat.bed";
@@ -144,9 +128,6 @@ sub concat_beds {
 	return ($concat);
 }
 
-#-----------------------------------------------------------------------------
-# Load TE age file if any
-# $age = TEshuffle::load_TEage($TEage,$v) unless ($TEage eq "na");
 #-----------------------------------------------------------------------------
 sub load_TEage {
 	my $in = shift;
@@ -167,10 +148,6 @@ sub load_TEage {
 	return (\%TEs);
 }
 
-#-----------------------------------------------------------------------------
-# Convert RMoutput .out file to bed if needed
-# my ($toshuff_file,$parsedRM,$rm,$rm_c) = TEshuffle::RMtobed($shuffle,$okseq,$filter,$f_regexp,$nonTE,$age,"y",$stype);
-# my ($toshuff_file,$parsedRM) = TEshuffle::RMtobed($shuffle,$okseq,$filter,$f_regexp,$nonTE,$age,$full);
 #-----------------------------------------------------------------------------
 sub RMtobed {
 	my ($file,$okseq,$filter,$f_regexp,$nonTE,$age,$full,$stype) = @_;
@@ -257,10 +234,6 @@ sub RMtobed {
 }
 
 #-----------------------------------------------------------------------------
-# Get infos from RMout
-# ($parsed,$rm,$rm_c) = getparsedRM($ok,$parsed,"file",$age,$rm,$rm_c,$stype);
-# ($parsed,$rm,$rm_c) = getparsedRM(\@l,$parsed,"line",$age,$rm,$rm_c,$stype);
-#-----------------------------------------------------------------------------
 sub getparsedRM {
 	my ($info,$parsed,$type,$age,$rm,$rm_c,$stype) = @_;
 	if ($type eq "line") { #meaning it's read from the .out while being converted in .bed
@@ -280,10 +253,6 @@ sub getparsedRM {
 	return ($parsed,$rm,$rm_c);
 }
 
-#-----------------------------------------------------------------------------
-# Get counts and length for each TE
-# ($parsed,$rm,$rm_c) = getparsedRMline($parsed,$info,$age,$rm,$rm_c,$stype)
-# ($parsed,$rm,$rm_c) = getparsedRMline($parsed,\@RMline,$age,$rm,$rm_c,$stype)
 #-----------------------------------------------------------------------------
 sub getparsedRMline {
 	my ($parsed,$l,$age,$rm,$rm_c,$stype) = @_;
@@ -312,9 +281,6 @@ sub getparsedRMline {
 	return ($parsed,$rm,$rm_c);
 }
 
-#-----------------------------------------------------------------------------
-# Load TSS from annotation gtf or gff
-# ($tss,$alltss) = load_and_print_tss($tssfile);
 #-----------------------------------------------------------------------------
 sub load_and_print_tss {
 	my $file = shift;
@@ -351,9 +317,6 @@ sub load_and_print_tss {
 }
 
 #-----------------------------------------------------------------------------
-# Load all TSS
-# my $alltss = load_all_tss($tssbed);
-#-----------------------------------------------------------------------------
 sub load_all_tss {
 	my $tssbed = shift;
 	my %alltss = ();
@@ -369,9 +332,6 @@ sub load_all_tss {
 }
 
 #-----------------------------------------------------------------------------
-# Load distance to closes
-# $closest = TEshuffle::load_closest_tss($tssclosest);
-#-----------------------------------------------------------------------------
 sub load_closest_tss {
 	my $tssclosest = shift;
 	my %closest = ();
@@ -385,10 +345,6 @@ sub load_closest_tss {
 	return (\%closest);
 }
 
-#-----------------------------------------------------------------------------
-# Cleanup previous outputs
-# my ($stats,$out,$outb,$temp) =                                TEshuffle::prep_out("bed",$dir,$nboot,$filter,$input,$stype,$nonTE);
-# my ($stats,$outl,$outlb,$temp_l,$outp,$outpb,$temp_p,$temp) = TEshuffle::prep_out("tr", $dir,$nboot,$filter,$input,$stype,$nonTE,$linc,$prot,$shuffle);
 #-----------------------------------------------------------------------------
 sub prep_out {
 	my ($type,$dir,$nboot,$filter,$input,$stype,$nonTE,$linc,$prot,$shuffle) = @_;	
@@ -424,35 +380,36 @@ sub prep_out {
 }	
 
 #-----------------------------------------------------------------------------
-# Shuffle, but keep distance to closest TSS
-# $shuffled = TEshuffle::shuffle_tss($toshuff_file,$temp,$i,$alltss,$closest) if ($stype eq "tss");
-#-----------------------------------------------------------------------------
 sub shuffle_tss {
-	my ($toshuff_file,$temp,$nb,$alltss,$closest) = @_;
+	my ($toshuff_file,$temp,$nb,$alltss,$closest,$okseq) = @_;
 	my $out = $temp."/shufffled".$nb;	
 	open (my $fh, '>', $out) or confess "\n   ERROR (sub shuffle_tss): can't open to write $out $!\n";
 	CHR: foreach my $chr (sort keys %{$closest}) {
-		warn "     WARN: $chr not found in the -a file\n" if (! $alltss->{$chr});
-		next CHR if (! $alltss->{$chr});
+		if (! $alltss->{$chr} || $alltss->{$chr}[0]->[0] eq $okseq->{$chr}) {
+			print STDERR "     WARN: $chr not found in the -a file => skip\n";
+			next CHR;
+		}	
 		fisher_yates_shuffle($alltss->{$chr}); # permutes @array in place; one array per chr => keep chr distribution
 		my $i = 0;
 		foreach my $te (keys %{$closest->{$chr}}) {
-			$i = 0 if (! $alltss->{$chr}[$i]); #basically, if end of the TSS for that chromosome, restart
+			$i = 0 if (! $alltss->{$chr}[$i]); #basically, if end of the TSS count for that chromosome, restart
 			my $tss = $alltss->{$chr}[$i];	
-			#get start and end, depends on strands
 			my @te = split(";",$te);
+			#get start and end, depends on strands
 			my $len = $te[6] - $te[5];
 			my ($st,$en);
+			#get the distance to closest TSS
 			my $dist = $closest->{$chr}{$te};
 			if ($tss->[1] eq "+") {
 				($dist > 0)?($st = $tss->[0] + $dist):($en = $tss->[0] - abs($dist)); #or + $dist
-				($dist > 0)?($en = $st + $len):($st = $en - $len);		
+				($dist > 0)?($en = $st + $len):($st = $en - $len);	
 			} else { 
 				($dist > 0)?($en = $tss->[0] - $dist):($st = $tss->[0] + abs($dist)); #or - $dist
 				($dist > 0)?($st = $en - $len):($en = $st + $len);		
 			}
-			$st = 1 if ($st <0); #added v4.2
-			print $fh "$chr\t$st\t$en\t$te\t.\t$te[8]\n"; #shuffled TE, same chromosome, with its distance to TSS maintained
+			#Check if out of chr, and correct
+			($st,$en) = correct_coords($st,$en,$okseq->{$chr},$te,$dist,$tss->[0],$len) if ($st < 0 || $en > $okseq->{$chr});
+			print $fh "$chr\t$st\t$en\t$te\t.\t$te[8]\n"; #shuffled TE, same chromosome, with its distance to TSS maintained when possible
 			$i++;
 		}
 	}
@@ -461,16 +418,15 @@ sub shuffle_tss {
 }
 
 #-----------------------------------------------------------------------------
-# Shuffle, but positions instead => keek current TE distribution
-# $shuffled = TEshuffle::shuffle_rm($toshuff_file,$temp,$i,$rm,$rm_c,$okseq) if ($stype eq "rm");	
-#-----------------------------------------------------------------------------
 sub shuffle_rm {
 	my ($toshuff_file,$temp,$nb,$rm,$rm_c,$okseq) = @_;
 	my $out = $temp."/shufffled".$nb;
 	open (my $fh, '>', $out) or confess "\n   ERROR (sub shuffle_rm): can't open to write $out $!\n";
 	CHR: foreach my $chr (sort keys %{$rm_c}) {
-		warn "     WARN: $chr not found in the -a file\n" if (! $rm_c->{$chr});
-		next CHR if (! $rm_c->{$chr});
+		if (! $rm_c->{$chr}) {
+			print STDERR "     WARN: $chr not found in the -q file\n";
+			next CHR;
+		}
 		fisher_yates_shuffle($rm_c->{$chr}) if ($rm_c->{$chr}[1]); # permutes @array in place; one array per chr => keep chr distribution
 		my $i = 0;
 		foreach my $te (@{$rm->{$chr}}) {			
@@ -479,16 +435,8 @@ sub shuffle_rm {
 			my $midlen = int(($te->[6] - $te->[5]) / 2 + 0.5);
 			my $st = $middle - $midlen;
 			my $en = $middle + $midlen;
-			if ($st < 0) {
-				my $shift = -$st; #put back in positive
-				$st = $st+$shift+1;
-				$en = $en+$shift+1;	
-			}
-			if ($okseq->{$chr} && $en > $okseq->{$chr}) {
-				my $shift = $en - $okseq->{$chr};
-				$st = $st-$shift;
-				$en = $okseq->{$chr};
-			}
+			#Check if out of chr, and correct
+			($st,$en) = correct_coords($st,$en,$okseq->{$chr},$te) if ($st < 0 || $en > $okseq->{$chr});
 			print $fh "$chr\t$st\t$en\t$l\t.\t$te->[8]\n"; 
 			$i++;
 		}	
@@ -497,8 +445,6 @@ sub shuffle_rm {
 	return ($out);
 }
 
-#-----------------------------------------------------------------------------
-# fisher_yates_shuffle
 #-----------------------------------------------------------------------------
 sub fisher_yates_shuffle { #http://www.perlmonks.org/?node_id=1869
     my $array = shift;
@@ -510,8 +456,43 @@ sub fisher_yates_shuffle { #http://www.perlmonks.org/?node_id=1869
 }
 
 #-----------------------------------------------------------------------------
-# Shuffle, with bedtools
-# my $shuffled = TEshuffle::shuffle_bed($toshuff_file,$temp_s,$i,$excl,$incl,$build_file,$bedtools,$nooverlaps);
+sub correct_coords {
+	my ($st,$en,$max,$te,$dist,$tss,$len) = @_;
+
+	#first, kick it on the other side if it was a tss and super far away (otherwise better to shift)
+	if ($tss) {
+		if ($en < 0) {
+			$st = $tss+abs($dist);
+			$en = $tss+abs($dist)+$len;
+		}
+		if ($st > $max) {
+			$st = $tss-abs($dist)-$len;
+			$en = $tss-abs($dist);	
+		}
+	}
+	#Now keep going if st or en are still out
+	my $ifshifted = 1 if ($st < 0 || $en > $max);
+	if ($st < 0) {
+		my $shift = -$st; #put back in positive
+		$st = $st+$shift+1;
+		$en = $en+$shift+1;	
+	}
+	if ($en > $max) {
+		my $shift = $en - $max;
+		$st = $st-$shift;
+		$en = $max;
+	}		
+	if ($tss) {
+		print STDERR "     WARN: distance to TSS is so large ($dist nt) that once randomized this TE: $te\n";
+		print STDERR "           got out of the sequence (st=$st and en=$en) => placed on the other side of the tss\n";		
+		print STDERR "           but that was still out, so was shifted to be inside the scaffold/chromosome\n" if ($ifshifted);
+	} else {		
+		print STDERR "     WARN: TE might be quite large ($te) that once randomized the start ($st) or end ($en) were out of the chromosome\n";
+		print STDERR "           => was shifted to be inside the scaffold/chromosome\n";
+	}	
+	return ($st,$en);
+}	
+
 #-----------------------------------------------------------------------------
 sub shuffle_bed {
 	my ($toshuff_file,$temp_s,$nb,$excl,$incl,$build,$bedtools,$nooverlaps) = @_;
@@ -522,10 +503,6 @@ sub shuffle_bed {
 	return ($out);
 }
 
-#----------------------------------------------------------------------------
-# Get class fam
-# my ($Rclass,$Rfam) = get_Rclass_Rfam($Rname,$classfam);
-# my ($Rcla,$Rfam) = TEshuffle::get_Rclass_Rfam($Rnam,$rm[10]);
 #----------------------------------------------------------------------------
 sub get_Rclass_Rfam {
 	my($Rname,$classfam) = @_;
@@ -545,8 +522,6 @@ sub get_Rclass_Rfam {
 }
 
 #-----------------------------------------------------------------------------
-# sub get_avg_and_sd
-#-----------------------------------------------------------------------------	
 sub get_avg_and_sd{
 	my($data) = @_;    
     warn "WARN: (sub print_stats/get_avg_and_sd): empty data array $!\n" if (not @$data);
@@ -572,8 +547,6 @@ sub get_avg_and_sd{
 }
 
 #-----------------------------------------------------------------------------
-# sub get_sign
-#-----------------------------------------------------------------------------	
 sub get_sign {
 	my $pval = shift;
 	my $sign;
@@ -588,10 +561,6 @@ sub get_sign {
 	return($sign);
 }
 
-#-----------------------------------------------------------------------------
-# sub binomial_test_R
-# $exp = TEshuffle::binomial_test_R($exp,"bed");
-# $te_exp = TEshuffle::binomial_test_R($te_exp,"tr_rep");
 #-----------------------------------------------------------------------------
 sub binomial_test_R {
 	my ($exp,$type) = @_;
@@ -659,8 +628,6 @@ sub binomial_test_R {
 	return($exp);
 }
 
-#-----------------------------------------------------------------------------
-# check the x, n and p values & print warnings
 #-----------------------------------------------------------------------------
 sub check_binom_values {
 	my ($k1,$k2,$k3,$x,$p,$n) = @_;

@@ -69,6 +69,9 @@ $CHANGELOG = "
 #  - v4.4 = Mar 08 2018
 #           Minor changes in logs and check options
 #           Was assuming a 5 columns bed file => fix
+#           Change for -s tss: if the TE ends up out of the scaffold/chr, put on the other side and if still out, shift it to be inside
+#           Also, skip if not in the annotation file
+#           Make -r mandatory for all
 \n";
 	return 1;
 }
@@ -79,21 +82,19 @@ sub set_usage {
 	$USAGE = "
 Synopsis (v$VERSION):
 
-    perl $SCRIPTNAME -f features.bed [-o <nt>] -q features_to_shuffle [-n <nb>] -s shuffling_type
+    perl $SCRIPTNAME -f features.bed [-o <nt>] -q features_to_shuffle [-n <nb>] -s shuffling_type -r <genome.sizes> [-b]
             [-a <annotations>] 
-            [-r <genome.range>] [-b] [-e <genome.gaps>] [-d] [-i <include.range>] [-x] 
+            [-e <genome.gaps>] [-d] [-i <include.range>] [-x] 
             [-w <bedtools_path>] [-l <if_nonTE>] [-t <filterTE>] [-c] [-g <TE.age.tab>] [-v] [-h]
 
     /!\\ REQUIRES: Bedtools, at least v18 (but I advise updating up to the last version; v26 has a better shuffling)
     /!\\ Previous outputs, if any, will be moved as *.previous [which means previous results are only saved once]
 
     Typically, for the 3 types, the mandatory arguments are:
-    perl $SCRIPTNAME -f features.bed -q rm.out -s rm
-    perl $SCRIPTNAME -f features.bed -q rm.out -s tss -a annotations.gtf
-    perl $SCRIPTNAME -f features.bed -q rm.out -s bed -r genome.range -e genome.gaps
+    perl $SCRIPTNAME -f features.bed -q rm.out -r genome.sizes -s rm 
+    perl $SCRIPTNAME -f features.bed -q rm.out -r genome.sizes -s tss -a annotations.gtf
+    perl $SCRIPTNAME -f features.bed -q rm.out -r genome.sizes -s bed -e genome.gaps
 	
-	Note that -r is advised for -s rm (but won't affect -s tss)
-
    CITATION:
     - include the version of the script + link to the GitHub page (https://github.com/4ureliek/TEanalysis)
     - Cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
@@ -142,17 +143,17 @@ Synopsis (v$VERSION):
                                           (TSS are shuffled and then assigned to a TE; 
                                           same TSS will be assigned multiple TEs if fewer TSS than TEs).
                                           Thanks to: Edward Chuong & Cedric Feschotte for the suggestion
+    -r,--range    => (STRING) To know the maximum value in a given chromosome/scaffold. 
+                              File should be: sequence_name \\t length
+                              Can be files from UCSC, files *.chrom.sizes
+                              If you don't have such file, use -b (--build) and provide the genome fasta file for -r  
 
    MANDATORY ARGUMENTS IF USING -s tss:
     -a,--annot    => (STRING) gtf or gff; annotations to load all unique TSS: will be used to set the distance
                               between each TE and the closest TSS that will be kept while randomization
                               Note that it requires transcript lines
-
-   MANDATORY ARGUMENTS IF USING -s bed:
-    -r,--range    => (STRING) To know the maximum value in a given chromosome/scaffold. 
-                              File should be: Name \\t length
-                              Can be files from UCSC, files *.chrom.sizes
-                              If you don't have such file, use -b (--build) and provide the genome fasta file for -r                               
+                              
+   MANDATORY ARGUMENTS IF USING -s bed:                           
     -e,--excl     => (STRING) This will be used as -excl for bedtools shuffle: \"coordinates in which features from -i should not be placed.\"
                               More than one file may be provided (comma separated), they will be concatenated 
                               (in a file = first-file-name.cat.bed).
@@ -183,14 +184,8 @@ Synopsis (v$VERSION):
     -x,--x        => (BOOL)   to add the -noOverlapping option to the bedtools shuffle command line, 
                               and therefore NOT allow overlaps between the shuffled features.
                               This may create issues mostly if -i is used (space to shuffle may be too small to shuffle features)
-
-   OPTIONAL ARGUMENTS IF USING -s rm:
-    -r,--range    => (STRING) Optional, but advised; to know the maximum TE end in a given chromosome/scaffold. 
-                              File should be: Name \\t length
-                              Can be files from UCSC, files *.chrom.sizes
-                              If you don't have such file, use -b (--build) and provide the genome fasta file for -r   
                              
-   OTHER OPTIONAL ARGUMENTS (for all -s):                                  
+   OTHER OPTIONAL ARGUMENTS (for all three -s):                                  
     -b,--build    => (BOOL)   See above; use this and provide the genome fasta file if no range/lengths file (-r)
                               This step may take a while but will create the required file	
     -o,--overlap  => (INT)    Minimal length (in nt) of intersection in order to consider the TE included in the feature.
@@ -269,22 +264,20 @@ check_options();
 sub check_options {
 	die "\n --- $SCRIPTNAME version $VERSION\n\n" if ($V);
 	die $USAGE if ($HELP);
-	die "\n SOME MANDATORY ARGUMENTS MISSING, CHECK USAGE:\n$USAGE" if (! $IN || ! $SHUFFLE || ! $STYPE);
+	die "\n SOME MANDATORY ARGUMENTS MISSING, CHECK USAGE:\n$USAGE" if (! $IN || ! $SHUFFLE || ! $STYPE  || ! $BUILD);
 	die "\n -f $IN is not a bed file?\n\n" unless ($IN =~ /\.bed$/);
 	die "\n -f $IN does not exist?\n\n" if (! -e $IN);
 	die "\n -q $SHUFFLE is not in a proper format? (not .out, .bed, .gff or .gff3)\n\n" unless ($SHUFFLE =~ /\.out$/ || $SHUFFLE =~ /\.bed$/ || $SHUFFLE =~ /\.gff$/ || $SHUFFLE =~ /\.gff3$/);
 	die "\n -q $SHUFFLE does not exist?\n\n" if (! -e $SHUFFLE);
-	die "\n -s $STYPE should be one of the following: bed, rm or tss\n\n" if ($STYPE ne "bed" && $STYPE ne "rm" && $STYPE ne "tss");
+	die "\n -s $STYPE should be one of the following: bed, rm or tss\n\n" if ($STYPE ne "bed" && $STYPE ne "rm" && $STYPE ne "tss");	
+	die "\n -r $BUILD does not exist?\n\n" if (! -e $BUILD);
 
 	#deal with conditional mandatory stuff
 	if ($STYPE eq "tss") {
 		die "\n -s tss was set, but -a is missing?\n\n" if (! $TSSFILE);
 		die "\n -a $TSSFILE does not exist?\n\n" if ($TSSFILE && ! -e $TSSFILE);	
-		die "\n -r $BUILD does not exist?\n\n" if (! -e $BUILD);
 	} elsif ($STYPE eq "bed") {
-		die "\n -s bed was set, but -r is missing?\n\n" if (! $BUILD);
 		die "\n -s bed was set, but -e is missing?\n\n" if (! $EXCLUDE);
-		die "\n -r $BUILD does not exist?\n\n" if (! -e $BUILD);
 		die "\n -e $EXCLUDE does not exist?\n\n" if ($EXCLUDE !~ /,/ && ! -e $EXCLUDE); #if several files, can't check existence here
 		die "\n -i $INCL does not exist?\n\n" if ($INCL ne "na" && $INCL !~ /,/ && ! -e $INCL); #if several files, can't check existence here
 	}
@@ -310,6 +303,7 @@ print STDERR "\n --- $SCRIPTNAME v$VERSION started, with:\n";
 print STDERR "     input file = $IN\n";
 print STDERR "     features to shuffle = $SHUFFLE\n";
 print STDERR "     shuffling type = $STYPE\n";
+print STDERR "     genome chromosome sizes = $BUILD\n";
 my $BEDV = `$BEDTOOLS bedtools --version`;
 chomp $BEDV;
 print STDERR "     bedtools version = $BEDV\n";
@@ -322,10 +316,8 @@ my ($STATS,$OUT,$OUTB,$TEMP) = TEshuffle::prep_out("bed",$DIR,$NBOOT,$FILTER,$IN
 
 #Chosomosome sizes / Genome range
 my ($OKSEQ,$BUILD_FILE);
-if ($BUILD || $DOBUILD) {
-	print STDERR " --- loading build (genome range)\n";
-	($OKSEQ,$BUILD_FILE) = TEshuffle::load_build($BUILD,$DOBUILD);
-}
+print STDERR " --- loading build (genome range)\n";
+($OKSEQ,$BUILD_FILE) = TEshuffle::load_build($BUILD,$DOBUILD);
 
 #prep steps if shuffling type is bed
 my $EXCL;
@@ -439,7 +431,7 @@ if ($NBOOT > 0) {
 	foreach (my $i = 1; $i <= $NBOOT; $i++) {
 		print STDERR "     ..$i bootstraps done\n" if (($i == 10) || ($i == 100) || ($i == 1000) || (($i > 1000) && (substr($i/1000,-1,1) == 0)));	
 		my $shuffled;
-		$shuffled = TEshuffle::shuffle_tss($TOSHUFF_F,$TEMP,$i,$ALLTSS,$CLOSEST) if ($STYPE eq "tss");
+		$shuffled = TEshuffle::shuffle_tss($TOSHUFF_F,$TEMP,$i,$ALLTSS,$CLOSEST,$OKSEQ) if ($STYPE eq "tss");
 		$shuffled = TEshuffle::shuffle_rm($TOSHUFF_F,$TEMP,$i,$RM,$RM_C,$OKSEQ) if ($STYPE eq "rm");	
 		$shuffled = TEshuffle::shuffle_bed($TOSHUFF_F,$TEMP,$i,$EXCL,$INCL,$BUILD_FILE,$BEDTOOLS,$NOOVERLAPS) if ($STYPE eq "bed");
 		`$INTERSectBed -a $shuffled -b $IN -wo > $TEMP/boot.$i.joined`;
