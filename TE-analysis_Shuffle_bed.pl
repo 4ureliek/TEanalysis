@@ -95,10 +95,11 @@ Synopsis (v$VERSION):
 	Note that -r is advised for -s rm (but won't affect -s tss)
 
    CITATION:
+    - include the version of the script + link to the GitHub page (https://github.com/4ureliek/TEanalysis)
     - Cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
-      (http://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1003470)
-      but should also include the GitHub link to this script (and version)
-      Also cite Lynch et al. (2015) Cell Reports (DOI: 10.1016/j.celrep.2014.12.052) if possible
+        (http://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1003470)
+      Also cite Trizzani, Kapusta and Brown (2018) BioRxiv if possible 
+        (https://www.biorxiv.org/content/early/2018/02/20/268771 - https://doi.org/10.1101/268771)
     - for BEDtools, please cite 
       Quinlan AR and Hall IM (2010) Bioinformatics (DOI: 10.1093/bioinformatics/btq033)
 
@@ -519,7 +520,7 @@ sub check_for_overlap {
 		$check{$id}{$Rcla.$Rfam.$Rnam}=1;
 		
 		#Now, age categories if any
-		if ($TEAGE) {
+		if ($TEAGE ne "na") {
 			if ($AGE->{$Rnam}) {
 				my $cat1 = $AGE->{$Rnam}[4];
 				my $cat2 = $AGE->{$Rnam}[5];
