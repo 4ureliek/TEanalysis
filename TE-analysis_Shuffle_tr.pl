@@ -32,7 +32,7 @@ use Data::Dumper;
 #flush buffer
 $| = 1;
 
-my $version = "6.1";
+my $version = "6.3";
 my $scriptname = "TE-analysis_Shuffle.pl";
 my $changelog = "
 #	- v1.0 = 2012
