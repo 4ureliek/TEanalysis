@@ -20,12 +20,13 @@ use warnings;
 use strict;
 use Carp;
 use Getopt::Long;
+use Data::Dumper;
 
 #keep STDOUT and STDERR from buffering
 select((select(STDERR), $|=1)[0]); #make STDERR buffer flush immediately
 select((select(STDOUT), $|=1)[0]); #make STDOUT buffer flush immediately
 
-my $version = "4.9";
+my $version = "4.13";
 my $changelog = "
 #	v1.0 = Mar 2013
 #      [...]
@@ -66,10 +67,19 @@ my $changelog = "
 #          - bug fix in the intersection calculation. Fix it, but also change to use the -wo instead
 #   v4.10 = 25 Jan 2017
 #          - Add count of features from the bed file in summary file
+#   v4.11 = 06 Feb 2017
+#          - Check on \$add to avoid error \"Use of uninitialized value in concatenation (.) or string....\"
+#   v4.12 = 27 Mar 2017
+#          - Bug fix \$add, still errors
+#          - Bug fix \$listtojoin, was erased when no subtract
+#          - Bug fix amounts
+#   v4.13 = 08 Jun 2018
+#          - Bug fix die errors if -RMparsed file not provided or if a repeat is missing from it
+#          - Few cosmetic changes
 
 # TO DO: 
+# - global vars in uc, and no need to pass them to subs...
 #  - Do a utils script to integrate data from several runs as summary or TEratios, like the Coverage one, but with mosaic plots
-
 #  - When -parse, previous files have to be deleted or it won't actually filter, it's annoying. Solve that.
 #  - Fix intron TrInfos - use exon coordinates to check and not introns, to see if SPL overlap. However, it's not really more informative than the exon output. 
 \n";
@@ -98,7 +108,7 @@ my $usage = "\nUsage [$version]:
    
    DETAILS OF OPTIONS (MD = mandatory and OPT = optional):
     -i         => MD  - (STRING) input file, see more details below (-f usage)
-                         in .bed format for -f bed; in gtf, gff, or any tabulated file for -f gtf
+                         in .bed format for -f bed; in gtf, gff3, or any tabulated file for -f gtf
     -dir       => OPT - (BOOL) add this if -i corresponds to a folder containing files to work with (need to contain ONLY these files!!)
     -f         => MD  - (STRING) This sets the type of analysis (kind of related to the format of the input file)
                          chose between -f gtf (complex) or -f bed (simple)
@@ -152,7 +162,8 @@ my $usage = "\nUsage [$version]:
     -filter    => OPT - (STRING) to filter on a specific column, to keep lines where <filter> is found in the column <col>
                          Can't be used on added columns. Lines not matching it won't be printed at all in any of the files.
                          You can:
-                         (i)  use a number corresponding to the -myf file column numbers, to the column number of a bed file, or to columns 0 to 7 of a gtf file
+                         (i)  use a number corresponding to the -myf file column numbers, to the column number of a bed file, 
+                              or to columns 0 to 7 of a gtf file
                               For example, use -filter 0,chr1 to analyze only chromosome 1
                          (ii) use the identifier of the feature if you want to filter a gtf file or a custom file
                               For example, use -filter gene_type,lincRNA or -filter transcript_type,lincRNA to keep only lincRNAs.
@@ -161,7 +172,8 @@ my $usage = "\nUsage [$version]:
                               This will exclude all lincRNAs but keep all the non coding stuff, unless they are < 200nt [should exclude all small RNAs]
     -parse     => OPT - (STRING) to filter on a specific column before joining with TEs, to keep lines where <filter> is found in the column <col>
                          Can be used ONLY on added columns. Lines not matching it won't be printed at all in any of the files.
-                         Typically, this allows to quickly check if some subsets differ (ex: -addcol 10 -parse 10,liver) if column 10 has the tissue of max. expression
+                         Typically, this allows to quickly check if some subsets differ (ex: -addcol 10 -parse 10,liver) 
+                         if column 10 has the tissue of max. expression
     -cut       => OPT - (STRING) to set size of intergenic regions analyzed (downstream and upstream), in nt
                          Default = 10000,5000,1000
     -v         => OPT - (BOOL) chose this to make the script talk to you
@@ -334,69 +346,92 @@ my ($subtract,$subid,$selfsub) = ("na","sub","yes");
 my ($RMbase,$TEage,$nonTE,$TEov) = (1,"na","none",10);
 my ($filter,$parse) = ("all,all","all,all");
 my $cut = "10000,5000,1000";
-my ($input,$dir,$RMout,$RMparsed,$TE,$clean,$chlog,$h,$help,$v);
-GetOptions ('i=s' => \$input, 'dir' => \$dir, 'f=s' => \$ft, 'myf=s' => \$myf, 'RMout=s' => \$RMout, 'TEov=s' => \$TEov, 'base=s' => \$RMbase, 'RMparsed=s' => \$RMparsed, 'TE=s' => \$TE, 'TEage' => \$TEage, 'nonTE=s' => \$nonTE, 'fa=s' => \$fa, 'subtract=s' => \$subtract, 'subid=s' => \$subid, 'noselfsub' => \$selfsub, 'bedtools=s' => \$bedtools, 'filter=s' => \$filter, 'parse=s' => \$parse, 'addcol=s' => \$addcol, 'cut=s' => \$cut, 'clean' => \$clean, 'chlog' => \$chlog, 'h' => \$h, 'help' => \$help, 'v' => \$v);
+my ($INPUT,$dir,$RMout,$RMPARSED,$TE,$clean,$chlog,$h,$help,$v);
+GetOptions ('i=s'        => \$INPUT, 
+            'dir'        => \$dir, 
+            'f=s'        => \$ft, 
+            'myf=s'      => \$myf, 
+            'RMout=s'    => \$RMout, 
+            'TEov=s'     => \$TEov, 
+            'base=s'     => \$RMbase, 
+            'RMparsed=s' => \$RMPARSED, 
+            'TE=s'       => \$TE, 
+            'TEage'      => \$TEage, 
+            'nonTE=s'    => \$nonTE, 
+            'fa=s'       => \$fa, 
+            'subtract=s' => \$subtract, 
+            'subid=s'    => \$subid, 
+            'noselfsub'  => \$selfsub, 
+            'bedtools=s' => \$bedtools, 
+            'filter=s'   => \$filter, 
+            'parse=s'    => \$parse, 
+            'addcol=s'   => \$addcol, 
+            'cut=s'      => \$cut, 
+            'clean'      => \$clean, 
+            'chlog'      => \$chlog, 
+            'h'          => \$h, 
+            'help'       => \$help, 
+            'v'          => \$v);
 
 #check step to see if mandatory arguments are provided + if help/changelog
-die "\n version $version\n\n" if ((! $input) && (! $RMout) && (! $h) && (! $help) && (! $chlog) && ($v));
+die "\n version $version\n\n" if (! $INPUT && ! $RMout && ! $h && ! $help && ! $chlog && $v);
 die $changelog if ($chlog);
 die $longhelp if ($help);
-die $usage if (($myf eq "na") && (! $clean) && ((! $input) || (! $RMout) || ($h)));
+die $usage if ($myf eq "na" && ! $clean && (! $INPUT || ! $RMout || $h));
 
 #print sample file for column informations for custom format, if -myf set without mandatory arguments
-myformat($myf) if ((! $input) && (! $RMout) && ($myf ne "na"));
+myformat($myf) if (! $INPUT && ! $RMout && $myf ne "na");
 
-die "\n   ERROR (main): RMout $input does not exist?\n\n" unless (-e $input); 
+die "\n   ERROR (main): input file $INPUT does not exist?\n\n" unless (-e $INPUT); 
+die "\n   ERROR (main): RMout $RMout does not exist?\n\n" unless (-e $RMout); 
 
 #get the list of input files + clean if needed
 my @listin = ();
 my %realins = ();
 if ($dir) {	
 	my $core;
-	$input = $1 if ($input =~ /^(.*)\/$/); #avoid the / at the end of path
-	my @list = `ls $input`;	
+	$INPUT = $1 if ($INPUT =~ /^(.*)\/$/); #avoid the / at the end of path
+	my @list = `ls $INPUT`;	
 	foreach my $in (@list) {
 		chomp ($in);
-		my $full = $input."/".$in;
+		my $full = $INPUT."/".$in;
 		push(@listin,$full);
 		#need to get core names in case cleaning required
 		if ($clean) {
 			$core = $1 if ($in =~ /^(.*)\.TEjoin\./);
-			$realins{$input."/".$core}=1;
+			$realins{$INPUT."/".$core}=1;
 		}
 	}
 } else {
-	push(@listin,$input);
-	$realins{$input}=1 if ($clean);	
+	push(@listin,$INPUT);
+	$realins{$INPUT}=1 if ($clean);	
 }
 clean_out(\%realins) if ($clean);
 
-die "\n   ERROR (main): RMout $RMout does not exist?\n\n" unless (-e $RMout); 
-
-#check some options
+#check some more options
 my ($fcol,$fname) = split (",",$filter);
 my ($pcol,$pname) = split (",",$parse);
 #check -f option values
-die "\n   ERROR (main): check -f option (use -h if you need to see the usage)\n\n" if (($ft ne "gtf") && ($ft ne "bed")); #even if not set it will be "gtf"
+die "\n   ERROR (main): check -f option (use -h if you need to see the usage)\n\n" if ($ft ne "gtf" && $ft ne "bed"); #even if not set it will be "gtf"
 #check filter and parse options
-die "\n   ERROR (main): -filter requires 2 values separated by a coma (-filter <col,filter>; use -h if you need to see the usage)\n\n" if (($filter ne "all,all") && ($filter !~ /,/));
-die "\n   ERROR (main): -filter col should be numeric is -myf is chosen (use -h if you need to see the usage)\n\n" if (($filter ne "all,all") && ($fcol !~ /\d/) && ($myf ne "na"));
-die "\n   ERROR (main): -filter col should be numeric < 7 or non digit (use -h if you need to see the usage)\n\n" if (($filter ne "all,all") && (($fcol !~ /[0-7]/) || ($fcol =~ /\D/)) && ($myf ne "na"));
+die "\n   ERROR (main): -filter requires 2 values separated by a coma (-filter <col,filter>; use -h if you need to see the usage)\n\n" if ($filter ne "all,all" && $filter !~ /,/);
+die "\n   ERROR (main): -filter col should be numeric is -myf is chosen (use -h if you need to see the usage)\n\n" if ($filter ne "all,all" && $fcol !~ /\d/ && $myf ne "na");
+die "\n   ERROR (main): -filter col should be numeric < 7 or non digit (use -h if you need to see the usage)\n\n" if ($filter ne "all,all" && ($fcol !~ /[0-7]/ || $fcol =~ /\D/) && $myf ne "na");
 die "\n   ERROR (main): -filter intragenic can't be chosen if -f bed is chosen (use -h if you need to see the usage)\n\n" if (($fname eq "intragenic") && ($myf ne "na") && ($ft ne "gtf"));
 die "\n   ERROR (main): -parse requires 2 values separated by a coma (use -h if you need to see the usage)\n\n" if (($parse ne "all,all") && ($parse !~ /,/));
 die "\n   ERROR (main): use of -parse ($parse) without any columns added with -addcol (use -h if you need to see the usage)\n\n" if (($addcol eq "na") && ($parse ne "all,all"));
 #if relevant, check that $addcol and $cut are numerical and , only
-die "\n   ERROR (main): check -addcol option (use -h if you need to see the usage)\n\n" if (($addcol ne "na") && ($addcol !~ /[,\d]/));
-die "\n   ERROR (main): check -cut option (use -h if you need to see the usage)\n\n" if ($cut !~ /^[0-9]+,[0-9]+,[0-9]+$/);
+die "\n   ERROR (main): check -addcol option (use -h if you need to see the usage)\n\n" if ($addcol ne "na" && $addcol !~ /[,\d]/);
+die "\n   ERROR (main): check -cut option (use -h if you need to see the usage)\n\n" if ($cut !~ /^[0-9,]+$/);
 #if relevant, check extension of the file to subtract
-die "\n   ERROR (main): check -subtract, file is not .gtf or .bed - if it is, please add the correct extension\n\n" if (($subtract ne "na") && ($subtract !~ /.*\.bed$/) && ($subtract !~ /.*\.gtf$/));
+die "\n   ERROR (main): check -subtract, file is not .gtf or .bed - if it is, please add the correct extension\n\n" if ($subtract ne "na" && $subtract !~ /.*\.bed$/ && $subtract !~ /.*\.gtf$/);
 
 #Now start everything => log in STDERR if -v basically
 if ($v) {
 	print STDERR "\n ------------------------------------------------------------------------------------------------\n";
 	print STDERR   " --- Script for TE analysis started (v$version)\n";
-	print STDERR   "      - Input file = $input\n" unless ($dir);
-	print STDERR "        - Input files are located in $input\n" if ($dir);
+	print STDERR   "      - Input file = $INPUT\n" unless ($dir);
+	print STDERR "        - Input files are located in $INPUT\n" if ($dir);
 	print STDERR   "        -> Format / Analyze type = $ft\n";
 	print STDERR   "        -> Custom columns will be extracted from $myf\n" if ($myf ne "na");
 	print STDERR   "        -> Filtering of input file = $filter\n" if ($filter ne "all,all");	
@@ -406,7 +441,7 @@ if ($v) {
 	print STDERR   "        -> base = $RMbase\n";
     print STDERR   "        -> minimal length of intersection = $TEov nt\n" if (substr($TEov,-1) ne "%");
     print STDERR   "        -> minimal overlap of feature and TE = $TEov of the feature\n" if (substr($TEov,-1) eq "%");
-	print STDERR   "        -> parsed file = $RMparsed (over/under represention of TE families will be determined)\n" if ($RMparsed);
+	print STDERR   "        -> parsed file = $RMPARSED (over/under represention of TE families will be determined)\n" if ($RMPARSED);
 	print STDERR   "        -> TE file = $TE\n" if ($TE);
 	print STDERR   "        -> lineage/age info will be added in outputs + TE amounts will be parsed by age\n" if ($TEage ne "na");
 	print STDERR   "        -> nonTE repeats will be filtered as -nonTE $nonTE (see usage or full documentation)\n";
@@ -420,7 +455,7 @@ if ($v) {
 			print STDERR   "        -> up and downstream regions won't be analyzed\n";
 		}		
 		print STDERR   "      - $subtract will be subtracted from introns and intergenic regions\n" if ($subtract ne "na");
-		($selfsub eq "yes")?(print STDERR "        -> option -noselfsub not chosen  => $input will be subtracted from introns and surrounding regions as well\n"):(print STDERR "        -> option -noselfsub chosen  => $input won't be subtracted from introns and surrounding regions\n");
+		($selfsub eq "yes")?(print STDERR "        -> option -noselfsub not chosen  => $INPUT will be subtracted from introns and surrounding regions as well\n"):(print STDERR "        -> option -noselfsub chosen  => $INPUT won't be subtracted from introns and surrounding regions\n");
 		print STDERR   "        -> subtract ID = $subid (will be in file names)\n" if ($subtract ne "na");	
 	}
 	$bedtools = $1 if (($bedtools ne "na") && ($bedtools =~ /^(.*)\/$/)); #avoid the / at the end of pathif ($bedtools ne "na");
@@ -433,8 +468,16 @@ if ($v) {
 my $TEinfo = ();
 my $TEinfoRMP = ();
 my $TE_RMP = ();
-($TE)?($TEinfo = get_TEs_infos($TE,$v)):($TEinfo->{"na"} = "na");
-($RMparsed)?(($TEinfoRMP,$TE_RMP) = get_TEs_infos($RMparsed,$v)):($TEinfoRMP->{"na"} = "na",$TE_RMP->{"na"} = "na");
+if ($TE) {
+	$TEinfo = get_TEs_infos($TE,$v);
+} else {
+	($TEinfo->{"na"} = "na");
+}
+if ($RMPARSED) {
+	($TEinfoRMP,$TE_RMP) = get_TEs_infos($RMPARSED,$v);
+} else {
+	$TEinfoRMP->{"na"} = "na",$TE_RMP->{"na"} = "na";
+}
 
 #Then write TEs in bed format if needed => do some filtering out (nonTE stuff)
 $RMout = RMtobed($RMout,$RMbase,$TEinfoRMP,$TEinfo,$nonTE,$v);
@@ -457,7 +500,7 @@ foreach my $in (@listin) {
 	my $listtojoin = ();
 	my $listoffiles = ();
 	my $name = $in;
-	$name = $1 if ($in =~ /(.*)\.gtf/);
+	$name = $1 if ($in =~ /(.*)\.gtf|gff|gff3$/);
 	my $ExSt = "$name.ExSt.$addn.tab";
 	my $TrInfos = ();
 	my $feat = ();
@@ -468,7 +511,7 @@ foreach my $in (@listin) {
 		my $TrMatLen = ();
 		$TrMatLen->{"na"} = "na"; #initialize a value to avoid messing with arguments for get_tr_infos
 		$TrMatLen = get_TrMatLen($in,$v) if ($fname eq "intragenic"); #only possible if $myf ne "na" (option checked at the beginning of the script)
-		($pc,$big,$TrInfos,$listtojoin) = get_tr_infos($in,$set,$name,$filter,$addcol,$parse,$addn,$TrMatLen,$v);
+		($pc,$big,$TrInfos,$listtojoin) = get_tr_infos($in,$set,$name,$filter,$addcol,$parse,$addn,$TrMatLen,$v);		
 		push(@{$listoffiles},"$name.nc.$addn.introns") if (-e "$name.nc.$addn.introns.bed"); 
 		push(@{$listoffiles},"$name.pc.$addn.introns") if (-e "$name.pc.$addn.introns.bed"); 
 		push(@{$listoffiles},"$name.pc.$addn.CDS.introns") if (-e "$name.pc.$addn.CDS.introns.bed"); 
@@ -516,14 +559,13 @@ foreach my $in (@listin) {
 		if (($subtract ne "na") || ($selfsub eq "yes")) {
 			$listtojoin = subtract($listtojoin,$listoffiles,$subtract,$subid,$name,$in,$selfsub,$bedtools,$TrInfos,$addn,$cut,$v);
 		} else {
-			print STDERR "\n --- No subtraction of annotations to do on $in\n";
-			$listtojoin = $listoffiles;
+			push(@{$listtojoin},@{$listoffiles});
 		}	
 	} else {
 		#Bed file - just join it
 		$name = $1 if ($in =~ /(.*)\.bed/);
 		push(@{$listtojoin},$name);
-	}	
+	}
 	
 	#Join files with TEs [longest step]
 	#####################################################
@@ -632,7 +674,7 @@ transcript_type = 8   #can be same as gene biotype
 #----------------------------------------------------------------------------
 # get TE infos; for -TE or for -RMparsed
 # ($TE)?($TEinfo = get_TEs_infos($TE,$v)):($TEinfo->{"na"} = "na");
-# ($RMparsed)?(($TEinfoRMP,$TE_RMP) = get_TEs_infos($RMparsed,$v)):($TEinfoRMP->{"na"} = "na",$TE_RMP->{"na"} = "na");
+# ($RMPARSED)?(($TEinfoRMP,$TE_RMP) = get_TEs_infos($RMPARSED,$v)):($TEinfoRMP->{"na"} = "na",$TE_RMP->{"na"} = "na");
 # called by main
 #----------------------------------------------------------------------------
 sub get_TEs_infos {
@@ -1089,17 +1131,30 @@ sub get_tr_infos {
 		#2) simply filter out if it does not match
 		next LINE if (($filter ne "all,all") && ($fname ne $filtering));
 				
+				
+		#NEED TO FIX THIS TIHNG HERE... 
+				
+				
 		#Filter out if relevant: -parse	
-		if (($parse ne "all,all") && ($addcol ne "na")) {
+		if ($parse ne "all,all" && $addcol ne "na") {
+			print STDERR "parse = $parse\n";
 			my $skip = 1;
 			my @cols = @{$colstoadd};
 			#start looping end of usual file
 			my @line = split('\t',$line);
+			print STDERR "\n$line\n";
 			my $st = $#line - $#cols;
+			print STDERR "st = $st = $#line - $#cols\n";
+			print STDERR "colstoadd = @cols\n";
 			for (my $i = 0; $i <= $#cols; $i ++) {
 				my $value = $cols[$i];
 				my $add = $i + $st;
-				$skip = 0 if (($pcol eq $add) && ($pname eq $value));
+#				print STDERR "add = $add ($i + $st?)\n";
+#				print STDERR "is pcol($pcol) eq add($add) ? && pname($pname) eq val($value) ?\n";
+				if ($pcol eq $add && $pname eq $value) {
+					$skip = 0;
+					last;
+				}
 			}
 			next LINE if ($skip == 1); #filter only if correct column
 		}
@@ -1657,15 +1712,14 @@ sub get_amounts {
 	my $amount = "$name.$addn.amounts.txt";
 	`rm -Rf $amount`;
 	print STDERR "      => $amount\n" if ($v);
-	my @list = @{$list};
 	my @cut = split(",",$cut);
 	my $genlen = ();
-	foreach my $file (@list) {
-		print STDERR "      - $file.bed\n" if ($v);
+	foreach my $file (@{$list}) {
+		print STDERR "         - $file.bed\n" if ($v);
 		#load the bed file into a table
-		if (($ft eq "bed") || (($ft eq "gtf") && (($file =~ /\.exons/) || ($file =~ /\.CDS/) || ($file =~ /\.UTR/) || ($file =~ /\.introns\./)))) {
+		if ($ft eq "bed" || ($ft eq "gtf" && ($file =~ /\.exons/ || $file =~ /\.CDS/ || $file =~ /\.UTR/ || $file =~ /\.introns/))) {
 			$genlen = get_amounts_sub($amount,$file,$genlen,"all");
-		} elsif (($ft eq "gtf") && (($file =~ /\.up\./) || ($file =~ /\.dw\./))) {
+		} elsif ($ft eq "gtf" && ($file =~ /\.up\./ || $file =~ /\.dw\./)) {
 			print STDERR "         => " if ($v);
 			foreach my $c (@cut) {
 				print STDERR "$c " if ($v);
@@ -1687,16 +1741,17 @@ sub get_amounts_sub {
 	my ($amount,$file,$genlen,$c) = @_;
 	#load the file in a table
 	open(my $fh, "<", "$file.bed") or confess "\n   ERROR (sub get_amounts_sub): could not open to read $file.bed $!\n";	
-	my @bed = ();		
+	my @bed = ();
 	LINE: while(<$fh>) {
 		chomp (my $l = $_);
 		next LINE if ($l !~ /\w/);
 		my @l = split('\t',$l); 	
-		push(@bed, \@l);	
+		push(@bed, \@l);
 	}
 	close($fh);
 	#sort the bed file
 	@bed = sort {($a -> [0] cmp $b -> [0]) || ($a -> [1] <=> $b -> [1]) || ($a -> [2] <=> $b -> [2])} @bed;
+	
 	#now loop to get amount
 	my $totlen = 0;
 	my $overlap = 0;
@@ -1750,9 +1805,10 @@ sub parse_join {
 	# II. loop to get TrInfos and other values+ print output files	
 		print STDERR "         -> Extracting parsing information + printing outputs:\n";
 		my @cut = split(",",$cut);
-		my @addcol = split (",",$addcol);
+		my @addcol = ();
+		($addcol =~ /,/)?(@addcol = split (",",$addcol)):(push(@addcol,$addcol));
 		my $add = $#addcol;
-		$add = 0 if ($addcol eq "na");		
+		$add = 0 if ($addcol eq "na");
 		$file =~ s/\.bed$//;
 		
 		#0) Deal with simple bed file
@@ -1952,10 +2008,12 @@ sub loop_join {
 		}
 		print $tr_fh "$trinfosline{$key}->[1]\t";
 
-		#print added columns if relevant	
-		for (my $a=10; $a<=$add+10; $a++) {
-			print $tr_fh "$TrInfos->{$Tr_ID_full}[$a]\t";
-		}
+		#print added columns if relevant
+		unless ($add == 0) {
+			for (my $a=10; $a<=$add+10; $a++) {
+				print $tr_fh "$TrInfos->{$Tr_ID_full}[$a]\t";
+			}
+		}	
 		print $tr_fh "\n";
 	}
 	close($tr_fh);
@@ -2233,10 +2291,15 @@ sub print_OUT {
 	my ($totGnrTEs,$totGlenTEs,$totlenTEs) = (0,0,0);
 	foreach my $id (sort keys %{$TEcat->{'lf'}}) {
 		$totlenTEs+=$TEcat->{'lf'}{$id};
-		my ($Rname,$Rclass,$Rfam) = split(/#|\//,$id);
-		print STDERR "$Rname,$Rclass,$Rfam\n" unless ($TE_RMP->{'l'}{lc($Rname)});
-		$totGlenTEs+=$TE_RMP->{'l'}{lc($Rname)};
-		$totGnrTEs+=$TE_RMP->{'cnr'}{lc($Rname)};
+		my ($Rname,$Rclass,$Rfam) = split(/#|\//,$id);	
+		if ($RMPARSED) {
+			if ($TE_RMP->{'l'}{lc($Rname)}) {
+                $totGlenTEs+=$TE_RMP->{'l'}{lc($Rname)};
+                $totGnrTEs+=$TE_RMP->{'cnr'}{lc($Rname)};
+            } else {
+                print STDERR "$Rname,$Rclass,$Rfam is in the RMout but not in the parsedRM file\n" unless ($TE_RMP->{'l'}{lc($Rname)});
+            }
+		}              
 	}
 	
 	$file =~ s/\.TEjoin$//;
@@ -2259,7 +2322,7 @@ sub print_OUT {
 		#get in genome and ratios inf relevant
 		my $in_genome = "na\tna\tna\tna\tna";
 		my ($r_len,$r_nrc) = ("na","na");
-		unless ($TE_RMP->{'na'}) {
+		if ($RMPARSED) {
 			my $in_G_per_len = $TE_RMP->{'l'}{lc($Rname)} / $totGlenTEs *100;
 			my $in_G_per_nrc = $TE_RMP->{'cnr'}{lc($Rname)} / $totGnrTEs *100;
 			$in_genome = "$TE_RMP->{'l'}{lc($Rname)}\t$in_G_per_len\t$TE_RMP->{'ctot'}{lc($Rname)}\t$TE_RMP->{'cnr'}{lc($Rname)}\t$in_G_per_nrc";
@@ -2347,7 +2410,8 @@ sub print_OUT {
 			$tot+=$class{$k}->[$i];
 		}
 		if ($k eq "Length") {
-			my $per = $tot / $totlen->{$file}{$c} *100;
+			my $per = 0;
+			$per = $tot / $totlen->{$file}{$c} *100 if ($totlen->{$file}{$c} > 0);
 			print $classfh "$tot\t$per";
 		}
 		print $classfh "\n";
@@ -2508,8 +2572,8 @@ sub summary {
 				$nb++;
 			}
 			my ($tot,$per) = (0,0);
-			($tot{$id}{$type})?($tot = $tot{$id}{$type}):($tot = $tot{'tr'}{$type});
-			$per = $nb / $tot *100 unless ($tot == 0);
+			(exists $tot{$id}{$type})?($tot = $tot{$id}{$type}):($tot = $tot{'tr'}{$type});
+			$per = $nb / $tot *100 unless (! $tot || $tot == 0);
 			print $fh "$id\t$type\t$nb\t$tot\t$per\n";
 		}		
 	}	
