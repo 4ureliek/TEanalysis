@@ -26,8 +26,11 @@ use Data::Dumper;
 select((select(STDERR), $|=1)[0]); #make STDERR buffer flush immediately
 select((select(STDOUT), $|=1)[0]); #make STDOUT buffer flush immediately
 
-my $version = "4.13";
-my $changelog = "
+my $version = "4.14";
+my $changelog;
+set_changelog();
+sub set_changelog { 
+	$changelog = "
 #	v1.0 = Mar 2013
 #      [...]
 #	v4.0 = Nov 2014
@@ -76,20 +79,34 @@ my $changelog = "
 #   v4.13 = 08 Jun 2018
 #          - Bug fix die errors if -RMparsed file not provided or if a repeat is missing from it
 #          - Few cosmetic changes
+#   v4.14 = 20 Jul 2018
+#          - deal with differences between old and new parseRM.pl outputs
+#          - Few cosmetic changes
 
 # TO DO: 
-# - global vars in uc, and no need to pass them to subs...
+#  - check what is used in TEinfoRMP, remove useless stuff 
+#  - global vars in uc, and no need to pass them to subs...
 #  - Do a utils script to integrate data from several runs as summary or TEratios, like the Coverage one, but with mosaic plots
 #  - When -parse, previous files have to be deleted or it won't actually filter, it's annoying. Solve that.
 #  - Fix intron TrInfos - use exon coordinates to check and not introns, to see if SPL overlap. However, it's not really more informative than the exon output. 
 \n";
+	return 1;
+}
 
-my $usage = "\nUsage [$version]: 
-    perl TE-analysis_pipeline_v4+.pl -i <inputfile> [-dir] -f <format> [-myf <col_details.txt>] -RMout <RepeatMasker.out> [-RMparsed RM.out.parsed] [-base <RM base>] [-TE <TE.tab>] [-TEage] [-nonTE <X>] [-fa <genome.fa>] [-subtract <what-to-subtract>] [-subid <name>] [-noselfsub] [-bedtools <path/to/bins>] [-addcol <col1,col2,etc>] [-filter <col,filter>] [-parse <col_nb,filter>] [-cut <X,X,X>] [-v] [-clean] [-chlog] [-h] [-help]
+my $usage;
+set_usage();
+sub set_usage {
+	$usage = "\nUsage [$version]: 
+    perl TE-analysis_pipeline_v4+.pl -i <inputfile> [-dir] -f <format> [-myf <col_details.txt>] 
+    -RMout <RepeatMasker.out> [-RMparsed RM.out.parsed] [-base <RM base>] [-TE <TE.tab>] [-TEage] [-nonTE <X>] 
+    [-fa <genome.fa>] [-subtract <what-to-subtract>] [-subid <name>] [-noselfsub] [-bedtools <path/to/bins>] 
+    [-addcol <col1,col2,etc>] [-filter <col,filter>] [-parse <col_nb,filter>] [-cut <X,X,X>]
+    [-v] [-clean] [-chlog] [-h] [-help]
    
    SYNOPSIS
     Type -help for detailed explanations + on how to read the outputs.
-    Pipeline to analyse TE composition in features (exons of transcripts, coding or non coding, transcription factor binding sites, ChIP-seq data, etc)
+    Pipeline to analyse TE composition in features (exons of transcripts, coding or non coding, 
+       transcription factor binding sites, ChIP-seq data, etc)
     
    REQUIREMENTS
     BEDtools is required for this pipeline to run (Quinlan AR and Hall IM, 2010. Bioinformatics)
@@ -128,7 +145,8 @@ my $usage = "\nUsage [$version]:
                         (STRING) put a % after a number (FLOAT) to filter out when less than X% of the feature overlaps with the TE
                          Ex: -TEov 80% will skip the line if less than 80% of the feature overlaps with the TE
     -RMparsed  => OPT - (STRING) repeat masker output parsed with parseRM.pl script (with or without the -lib option)
-                         Typically, the file is <RMout.out>.parseRM.all-repeats.tab (see documentation for more details on how to get this file)
+                         Typically: <RMout.out>.parseRM.all-repeats.tab
+                         See documentation for more details on how to get this file.
                          If not provided, over represented TE families won't be determined
     -base      => OPT - (INT) 0 or 1. Typically, if the file is from Repeat Masker website chose 1, if from UCSC chose 0.
                          If base 0 is chosen, 1 will be added to start of TE coordinates
@@ -186,8 +204,13 @@ my $usage = "\nUsage [$version]:
     -help      => OPT - (BOOL) to print a more detailed doc for this pipeline
     
 ";
+	return 1;
+}
 
-my $longhelp = "\nSome documentation for TE-analysis_pipeline.pl [$version]
+my $longhelp;
+set_longhelp();
+sub set_longhelp {
+	$longhelp = "\nSome documentation for TE-analysis_pipeline.pl [$version]
     Author       :  Aurelie Kapusta 
 	Last update  :  04 Oct 2016
 
@@ -336,7 +359,8 @@ my $longhelp = "\nSome documentation for TE-analysis_pipeline.pl [$version]
 		Len = ratio that tells you if a TE is potentially over represented
 		nb = ratio based on nrCounts = used for stats but better to relie on RATION Len for figures if any
 ";
-	
+	return 1;
+}	
 		
 ################################################################################
 # Get arguments/options, check some of them
@@ -574,7 +598,7 @@ foreach my $in (@listin) {
 	#Parse the joined files with TEs
 	#####################################################
 	my $feat_nb = `wc -l $in`;
-	$feat_nb =~ s/^([0-9]+?)\s+.*$/$1/;
+	$feat_nb =~ s/^\s*([0-9]+?)\s+.*$/$1/;
 	$feat->{'all'}{'all'}{$in}=$feat_nb; #save number of features by file for bed ft
 	my $totlen = get_amounts($listtojoin,$name,$addn,$TrInfos,$cut,$ft,$v); #using files before joining
 	my $countTE = parse_join($listtoanalyse,$TrInfos,$ExInfo,$TEinfoRMP,$TE_RMP,$TEinfo,$TEage,$addcol,$cut,$totlen,$TEov,$ft,$v);
@@ -685,32 +709,81 @@ sub get_TEs_infos {
 	open(my $in_fh, "<", $in) or confess "\n   ERROR (sub get_TEs_infos): could not open to read $in $!\n";
 	my $i = 0;
 	my $r = 0;
+	my $ifn = "y";
 	LINE: while(<$in_fh>) {
 		chomp (my $line = $_);
-		$r = 1 if (($i == 0) && ($in =~ /.out.parseRM.*.tab$/) && ($line =~ /Rlen/));
-		$i++;
-		next LINE if (($line !~ /\w/) || (substr($line,0,5) eq "Rname") || (substr($line,0,1) eq "#"));
-		my @TEs = split('\t', $line); 		
-		my $Rname = shift @TEs; #Rname not in values now, will be the key
-		$TEs[1] =~ s/\//_/; #making sure no / in family
-		$TEs[1] = $TEs[1]."--int" if (($TEs[1] =~ /ERV/) && (($Rname =~ /[-_][iI]nt/) || ($Rname =~ /[-_]I$/)));	
-		$TEs[2] = $TEs[0]."/".$TEs[1];
-		#change TEs list if it's not the -TE file, just to avoid storing the whole line
-		if ($in =~ /.parseRM.*.tab$/) {			
-			$TEs[17+$r] = 0 unless ($TEs[17+$r]); #length overlap - may not be defined
-			$TEs[18+$r] = 0 unless ($TEs[18+$r]); #percentage of genome overlap - may not be defined		
-			$TE_RMP{'l'}{lc($Rname)}+=($TEs[13+$r]-$TEs[17+$r]);
-			$TE_RMP{'p'}{lc($Rname)}+=($TEs[16+$r]-$TEs[18+$r]);
-			$TE_RMP{'cnr'}{lc($Rname)}+=($TEs[6+$r]);
-			$TE_RMP{'ctot'}{lc($Rname)}+=($TEs[4+$r]);
-			#        class   famm  class/fam   frg    frg_st-to-end nr_frg   avg%div  len_masked %genome_masked len_overlap %genome_overlap(for this repeat) 			
-			@TEs = ($TEs[0],$TEs[1],$TEs[2],$TEs[4+$r],$TEs[5+$r],$TEs[6+$r],$TEs[7+$r],$TEs[13+$r],$TEs[16+$r],$TEs[17+$r],$TEs[18+$r]);
+		if ($i == 0 && $in =~ /.out.parseRM.*.tab$/ && $line =~ /Rfullname/ && $line =~ /MED_LEN_MASKED/) {
+			$r = 1 if ($line =~ /Rlen/);
+			$ifn = "n";
 		}	
-		#now load
-		$TEs{lc($Rname)} = \@TEs;
+		$i++;
+		next LINE if ($line !~ /\w/ || substr($line,0,5) eq "Rname" || substr($line,0,1) eq "#");
+		my @TEs = split('\t', $line); 
+		
+		#Deal with name, class, fam:
+		my ($Rn,$Rc,$Rf) = ($TEs[0],$TEs[1],$TEs[2]);		
+		#make sure no / in family
+		$Rf =~ s/\//_/;
+		#add the -int if not there
+		$Rf = $Rf."--int" if ($Rf =~ /ERV/ && ($Rn =~ /[-_][iI]nt/ || $Rn =~ /[-_]I$/));
+		my $Rcf = $Rc."/".$Rf;
+		
+		if ($in =~ /.parseRM.*.tab$/) {
+			#Now the rest of the columns will differ:	
+			#columns in new parseRM.pl:
+			# 3		4			5								6				7			8
+			# Rlen 	FRG_NB_all	FRG_NB_Reconstructed_repeats	LEN_MASKED_NR	AVG_%DIV	MED_%DIV	
+			# 9			10			11			12			13				14
+			# AVG_%DEL	MED_%DEL	AVG_%INS	MED_%INS	AVG_LEN_MASKED	%_GENOME
+			# 15			16					17
+			# LEN_OVERLAP	%_OVERLAP_(GENOME)	%_OVERLAP_(LEN_MASKED)
+		
+			#columns in old parseRM.pl (Rlen not necessarily there):
+			# 5			6					7			8			9
+			# FRG_NB	FRG_NB_StartToEnd	NR_FRG_NB	AVG_%DIV	MED_%DIV	
+			# 10			11		12			13			14			15				16				17
+			# AVG_%DEL	MED_%DEL	AVG_%INS	MED_%INS	LEN_MASKED	AVG_LEN_MASKED	MED_LEN_MASKED	%_GENOME	
+			# 18			19					20
+			# LEN_OVERLAP	%_OVERLAP_(GENOME)	%_OVERLAP_(LEN_MASKED)
+			
+			my ($frg,$frgnr,$ad,$len,$pgm,$leno,$pgmo);
+			if ($ifn eq "y") {
+				($frg,$frgnr,$ad) = ($TEs[4],$TEs[5],$TEs[7]);
+				($len,$pgm) = ($TEs[6],$TEs[14]);
+				if ($TEs[15] && $TEs[16]) {
+					($leno,$pgmo) = ($TEs[15],$TEs[16]);
+				} else {
+					($leno,$pgmo) = (0,0);
+				}
+			} else {
+				($frg,$frgnr,$ad) = ($TEs[5+$r],$TEs[7+$r],$TEs[8+$r]);
+				($len,$pgm) = ($TEs[14+$r],$TEs[17+$r]);
+				if ($TEs[14+$r] && $TEs[15+$r]) {
+					($leno,$pgmo) = ($TEs[14+$r],$TEs[15+$r]);
+				} else {
+					($leno,$pgmo) = (0,0);
+				}
+			}
+			#edit the list	
+			#class famm class/fam frg nr_frg avg%div len_masked %genome_masked len_overlap %genome_overlap(for this repeat) 
+			@TEs = ($Rc,$Rf,$Rcf,$frg,$frgnr,$ad,$len,$pgm,$leno,$pgmo);			
+		
+			#load TE_RMP hash			
+			$TE_RMP{'l'}{lc($Rn)}+=($len-$leno);
+			$TE_RMP{'p'}{lc($Rn)}+=($pgm-$pgmo);
+			$TE_RMP{'cnr'}{lc($Rn)}+=$frgnr;
+			$TE_RMP{'ctot'}{lc($Rn)}+=$frg;
+
+		}
+		#now load TE list
+		$TEs{lc($Rn)} = \@TEs;	#??? The only thing I use from this is the %div?? Double check, and store that only if yes!
 	}	
 	close $in_fh;
-	($in =~ /.parseRM.*.tab$/)?(return (\%TEs,\%TE_RMP)):(return \%TEs);
+	if ($in =~ /.parseRM.*.tab$/) {
+		return (\%TEs,\%TE_RMP);
+	} else {
+		return \%TEs;
+	}
 }
 
 #----------------------------------------------------------------------------
@@ -726,7 +799,7 @@ sub RMtobed {
 	print STDERR "\n --- Converting $RMout to bed\n" if ($v);
 	unless (-e $bed) {
 		print STDERR "     Filtering nonTE repeats based on -nonTE: $nonTE\n" if ($v);
-		print STDERR "     Updating TE class and family based on -TE\n" if (($v) && (! $TEinfo->{"na"}));
+		print STDERR "     Updating TE class and family based on -TE\n" if ($v && ! $TEinfo->{"na"});
 		print STDERR "     Updating TE class and family (if relevant) based on -RMparsed\n" if (($v) && (! $TEinfoRMP->{"na"}) && ($TEinfo->{"na"}));
 		print STDERR "     Updating TE class and family (if relevant) based on 1) -TE and 2) -RMparsed\n" if (($v) && (! $TEinfo->{"na"}) && (! $TEinfoRMP->{"na"}));
 		open(my $fh, "<$RMout") or confess "\n   ERROR (sub RMtobed): could not open to read $RMout!\n";
@@ -747,9 +820,9 @@ sub RMtobed {
 			
 			#update class and family if relevant (will have the additional --int)
 			if ($TEinfo->{$rname}) {
-				($Rclass,$Rfam,$Rclassfam) = ($TEinfo->{$rname}->[0],$TEinfo->{$rname}->[1],$TEinfo->{$rname}->[2]);
+				($Rclass,$Rfam,$Rclassfam) = ($TEinfo->{$rname}[0],$TEinfo->{$rname}[1],$TEinfo->{$rname}[2]);
 			} elsif ($TEinfoRMP->{$rname}) { #use this only if not in $TEinfo
-				($Rclass,$Rfam,$Rclassfam) = ($TEinfoRMP->{$rname}->[0],$TEinfoRMP->{$rname}->[1],$TEinfoRMP->{$rname}->[2]);
+				($Rclass,$Rfam,$Rclassfam) = ($TEinfoRMP->{$rname}[0],$TEinfoRMP->{$rname}[1],$TEinfoRMP->{$rname}[2]);
 			}	
 			
 			#now filter non TE or not, based on -nonTE value
@@ -1100,8 +1173,8 @@ sub get_tr_infos {
 	my @big = ();
 	my @listtojoin = ();
 	print STDERR "\n --- Reading $in and extracting informations (getting exons, introns, transcripts info)...\n" if ($v);
-	print STDERR "     Also filtering based on -filter ($filter)\n" if (($filter ne "all,all") && ($v));
-	print STDERR "     Also filtering based on -parse ($parse)\n" if (($parse ne "all,all") && ($v));
+	print STDERR "     Also filtering based on -filter ($filter)\n" if ($filter ne "all,all" && $v);
+	print STDERR "     Also filtering based on -parse ($parse)\n" if ($parse ne "all,all" && $v);
 	my %ifstuff = ();
 	($ifstuff{'pc'},$ifstuff{'nci'},$ifstuff{'pci'},$ifstuff{'cdsi'}) = (0,0,0,0);
 	my $prevtr;
@@ -1137,15 +1210,15 @@ sub get_tr_infos {
 				
 		#Filter out if relevant: -parse	
 		if ($parse ne "all,all" && $addcol ne "na") {
-			print STDERR "parse = $parse\n";
+#			print STDERR "parse = $parse\n";
 			my $skip = 1;
 			my @cols = @{$colstoadd};
 			#start looping end of usual file
 			my @line = split('\t',$line);
-			print STDERR "\n$line\n";
+#			print STDERR "\n$line\n";
 			my $st = $#line - $#cols;
-			print STDERR "st = $st = $#line - $#cols\n";
-			print STDERR "colstoadd = @cols\n";
+#			print STDERR "st = $st = $#line - $#cols\n";
+#			print STDERR "colstoadd = @cols\n";
 			for (my $i = 0; $i <= $#cols; $i ++) {
 				my $value = $cols[$i];
 				my $add = $i + $st;
@@ -1605,7 +1678,7 @@ sub subtract {
 			}
 		} else {
 			$tosubfull = "$name.nc.$addn.exons.bed";
-			print STDERR "     => $tosubfull (no pc exons)\n";
+			print STDERR "     => $tosubfull (no pc exons)\n" if ($v);
 		}	
 	}
 	if (($tosub ne "na") && ($selfsub eq "yes")) { #meaning both files to subtract
@@ -1689,7 +1762,7 @@ sub TE_join {
 	my @listtoanalyse = ();
 	print STDERR "\n --- Joining files with $RMout:\n" if ($v);
 	for (my $i=0;$i<=$#listtojoin;$i++) {
-		print STDERR "      - $listtojoin[$i].bed\n";
+		print STDERR "      - $listtojoin[$i].bed\n" if ($v);
 		my $out = "$listtojoin[$i].TEjoin.bed";
 		push(@listtoanalyse,$out);
 		unless (-e $out) {
@@ -1803,7 +1876,7 @@ sub parse_join {
 		@{$join} = sort { ($a -> [4] cmp $b -> [4]) || ($a -> [5] <=> $b -> [5]) || ($a -> [6] <=> $b -> [6]) || ($a -> [18] <=> $b -> [18]) || ($a -> [19] <=> $b -> [19])} @{$join};
 
 	# II. loop to get TrInfos and other values+ print output files	
-		print STDERR "         -> Extracting parsing information + printing outputs:\n";
+		print STDERR "         -> Extracting parsing information + printing outputs:\n" if ($v);
 		my @cut = split(",",$cut);
 		my @addcol = ();
 		($addcol =~ /,/)?(@addcol = split (",",$addcol)):(push(@addcol,$addcol));
@@ -2225,10 +2298,10 @@ sub get_TE_age_info {
 	my ($age1,$age2,$div) = ("na","na","na");
 	if (($TEage ne "na") && (! $TEinfo->{"na"}) && ($TEinfo->{lc($Rname)}[4])) {
 		($div,$age1,$age2) = ($TEinfo->{lc($Rname)}[3],$TEinfo->{lc($Rname)}[4],$TEinfo->{lc($Rname)}[5]);
-	} elsif (! $TEinfoRMP->{"na"}) {
-		#        class   famm  class/fam   frg     nr_frg  frg_st-to-end  avg%div  len_masked %genome_masked len_overlap %genome_overlap(for this repeat) 
-		#@TEs = ($TEs[0],$TEs[1],$TEs[2],$TEs[4+$r],$TEs[5+$r],$TEs[6+$r],$TEs[7+$r],$TEs[13+$r],$TEs[16+$r],$TEs[17+$r],$TEs[18+$r]);				
-		$div = $TEinfoRMP->{lc($Rname)}[6];
+	} elsif ($TEinfoRMP->{lc($Rname)}[5]) {
+		#       0     1   2         3   4      5 
+		#@TEs = class fam class/fam frg nr_frg avg%div len_masked %genome_masked len_overlap %genome_overlap(for this repeat) 			
+		$div = $TEinfoRMP->{lc($Rname)}[5];
 	}
 	return ($age1,$age2,$div);
 }	
@@ -2297,7 +2370,7 @@ sub print_OUT {
                 $totGlenTEs+=$TE_RMP->{'l'}{lc($Rname)};
                 $totGnrTEs+=$TE_RMP->{'cnr'}{lc($Rname)};
             } else {
-                print STDERR "$Rname,$Rclass,$Rfam is in the RMout but not in the parsedRM file\n" unless ($TE_RMP->{'l'}{lc($Rname)});
+                print STDERR "WARN: $Rname,$Rclass,$Rfam is in the RMout but not in the parsedRM file ( /!\\ this will generate \"0\" or \"na\" values in the TE ratio file)\n" unless ($TE_RMP->{'l'}{lc($Rname)});
             }
 		}              
 	}
@@ -2317,12 +2390,13 @@ sub print_OUT {
 		#get in set info
 		my $in_set_per_len = $TEcat->{'lf'}{$id} / $totlenTEs *100; 
 		my $in_set_per_nrc = $TEcat_counts{'c_nr'}{$id} / $totnrTEs *100; 
-		my $in_set_chrs = $TEcat->{'chr'}{$id};
+		my $in_set_chrs = "nd";
+		$in_set_chrs = $TEcat->{'chr'}{$id} if ($TEcat->{'chr'}{$id});
 		my $in_set = "$TEcat->{'lf'}{$id}\t$in_set_per_len\t$TEcat_counts{'c_all'}{$id}\t$TEcat_counts{'c_nr'}{$id}\t$in_set_per_nrc\t$in_set_chrs";
 		#get in genome and ratios inf relevant
 		my $in_genome = "na\tna\tna\tna\tna";
 		my ($r_len,$r_nrc) = ("na","na");
-		if ($RMPARSED) {
+		if ($RMPARSED && $totGlenTEs != 0) {
 			my $in_G_per_len = $TE_RMP->{'l'}{lc($Rname)} / $totGlenTEs *100;
 			my $in_G_per_nrc = $TE_RMP->{'cnr'}{lc($Rname)} / $totGnrTEs *100;
 			$in_genome = "$TE_RMP->{'l'}{lc($Rname)}\t$in_G_per_len\t$TE_RMP->{'ctot'}{lc($Rname)}\t$TE_RMP->{'cnr'}{lc($Rname)}\t$in_G_per_nrc";
