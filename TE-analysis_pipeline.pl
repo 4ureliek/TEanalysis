@@ -26,7 +26,7 @@ use Data::Dumper;
 select((select(STDERR), $|=1)[0]); #make STDERR buffer flush immediately
 select((select(STDOUT), $|=1)[0]); #make STDOUT buffer flush immediately
 
-my $version = "4.14";
+my $version = "4.15";
 my $changelog;
 set_changelog();
 sub set_changelog { 
@@ -82,10 +82,12 @@ sub set_changelog {
 #   v4.14 = 20 Jul 2018
 #          - deal with differences between old and new parseRM.pl outputs
 #          - Few cosmetic changes
+#   v4.15 = 24 Jul 2018
+#          - small bug fix to avoid dying at the TEratio printing step when a repeat is not in the parsedRM file
 
 # TO DO: 
 #  - check what is used in TEinfoRMP, remove useless stuff 
-#  - global vars in uc, and no need to pass them to subs...
+#  - global vars in uc, and no need to pass them to subs / cleaning writing!
 #  - Do a utils script to integrate data from several runs as summary or TEratios, like the Coverage one, but with mosaic plots
 #  - When -parse, previous files have to be deleted or it won't actually filter, it's annoying. Solve that.
 #  - Fix intron TrInfos - use exon coordinates to check and not introns, to see if SPL overlap. However, it's not really more informative than the exon output. 
@@ -2373,8 +2375,7 @@ sub print_OUT {
                 print STDERR "WARN: $Rname,$Rclass,$Rfam is in the RMout but not in the parsedRM file ( /!\\ this will generate \"0\" or \"na\" values in the TE ratio file)\n" unless ($TE_RMP->{'l'}{lc($Rname)});
             }
 		}              
-	}
-	
+	}		
 	$file =~ s/\.TEjoin$//;
 	
 	#I. print for TEs-ratios.out
@@ -2396,7 +2397,7 @@ sub print_OUT {
 		#get in genome and ratios inf relevant
 		my $in_genome = "na\tna\tna\tna\tna";
 		my ($r_len,$r_nrc) = ("na","na");
-		if ($RMPARSED && $totGlenTEs != 0) {
+		if ($RMPARSED && $TE_RMP->{'l'}{lc($Rname)} && $totGlenTEs != 0) {
 			my $in_G_per_len = $TE_RMP->{'l'}{lc($Rname)} / $totGlenTEs *100;
 			my $in_G_per_nrc = $TE_RMP->{'cnr'}{lc($Rname)} / $totGnrTEs *100;
 			$in_genome = "$TE_RMP->{'l'}{lc($Rname)}\t$in_G_per_len\t$TE_RMP->{'ctot'}{lc($Rname)}\t$TE_RMP->{'cnr'}{lc($Rname)}\t$in_G_per_nrc";
