@@ -82,7 +82,7 @@ sub set_changelog {
 #   v4.14 = 20 Jul 2018
 #          - deal with differences between old and new parseRM.pl outputs
 #          - Few cosmetic changes
-#   v4.15 = 24 Jul 2018
+#   v4.15 = 24 & 26 Jul 2018
 #          - small bug fix to avoid dying at the TEratio printing step when a repeat is not in the parsedRM file
 
 # TO DO: 
@@ -766,6 +766,14 @@ sub get_TEs_infos {
 					($leno,$pgmo) = (0,0);
 				}
 			}
+			
+			if ($pgm eq "nd") {
+				print STDERR "     /!\\ The % of the genome covered by each repeat is missing in $in\n";
+				print STDERR "          Please rerun parseRM.pl with the -f option\n";
+				print STDERR "     ... exiting\n\n";
+				exit;
+			}
+			
 			#edit the list	
 			#class famm class/fam frg nr_frg avg%div len_masked %genome_masked len_overlap %genome_overlap(for this repeat) 
 			@TEs = ($Rc,$Rf,$Rcf,$frg,$frgnr,$ad,$len,$pgm,$leno,$pgmo);			
@@ -2372,7 +2380,10 @@ sub print_OUT {
                 $totGlenTEs+=$TE_RMP->{'l'}{lc($Rname)};
                 $totGnrTEs+=$TE_RMP->{'cnr'}{lc($Rname)};
             } else {
-                print STDERR "WARN: $Rname,$Rclass,$Rfam is in the RMout but not in the parsedRM file ( /!\\ this will generate \"0\" or \"na\" values in the TE ratio file)\n" unless ($TE_RMP->{'l'}{lc($Rname)});
+            	unless ($TE_RMP->{'l'}{lc($Rname)}) {
+					print STDERR "            WARN: $Rname#$Rclass/$Rfam is in the RMout but not in the parsedRM file\n";
+					print STDERR "                  (/!\\ this will generate \"0\" or \"na\" values in the TE ratio file)\n";
+				}	
             }
 		}              
 	}		
