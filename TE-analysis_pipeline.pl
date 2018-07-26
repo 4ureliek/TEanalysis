@@ -836,8 +836,7 @@ sub RMtobed {
 			}	
 			
 			#now filter non TE or not, based on -nonTE value
-			next LINE if (($nonTE eq "none") && ($Rclass =~ /nonTE|snRNA|rRNA|tRNA|snoRNA|scRNA|srpRNA|[Ll]ow_complexity|[Ss]imple_repeat|[Ss]atellite/));
-			print STDERR "$Rclass\n" if ($rname =~ /trna/);
+			next LINE if (($nonTE eq "none") && ($Rclass =~ /nonTE|snRNA|rRNA|tRNA|snoRNA|scRNA|srpRNA|[Ll]ow_complexity|[Ss]imple_repeat|[Ss]atellite|ARTEFACT/));
 			next LINE if (($nonTE eq "no_nonTE") && ($Rclass =~ /nonTE/));
 			next LINE if (($nonTE eq "no_low") && ($Rclass =~ /[Ll]ow_complexity|[Ss]imple_repeat/));
 			
