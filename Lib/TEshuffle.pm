@@ -2,13 +2,12 @@
 #######################################################
 # SUBROUTINES
 # FOR SCRIPTS = TE-analysis_Shuffle_tr.pl & TE-analysis_Shuffle_bed.pl
-# => defined as TEshuffle package
 ######################################################
 package TEshuffle;
-#use Data::Dumper;
 use strict;
 use warnings;
 use Carp;
+#use Data::Dumper;
 
 #----------------------------------------------------------------------------
 sub filename {
@@ -169,7 +168,11 @@ sub RMtobed {
 		($parsed,$rm,$rm_c) = getparsedRM($ok,$parsed,"file",$age,$rm,$rm_c,$stype);
 		return ($ok,$parsed,$rm,$rm_c);
 	}
-	print STDERR "     -> $file is in bed format, but $ok does not exist; generating it...\n" if ($file =~ /(.*)\.bed$/);
+	if ($file =~ /(.*)\.bed$/) {
+		print STDERR "     -> $file is in bed format, but $ok does not exist; generating it...\n";
+	} else {
+		print STDERR "     -> Creating $ok...\n";
+	}
 	#now it means RM.out, or that the proper bed file does not exist => make it a bed file + load the parsing hash	
 	open(my $fh, "<$file") or confess "\n   ERROR (sub RMtobed): could not open to read $file $!\n";
 	open(my $bed_fh, ">$ok") or confess "\n   ERROR (sub RMtobed): could not open to write $ok $!\n";
@@ -192,9 +195,9 @@ sub RMtobed {
 		my ($Rclass,$Rfam) = get_Rclass_Rfam($Rname,$classfam);
 		
 		#now filter non TE or not, based on -nonTE value
-		next LINE if (($nonTE eq "none") && ($Rclass =~ /nonTE|snRNA|rRNA|tRNA|snoRNA|scRNA|srpRNA|[Ll]ow_complexity|[Ss]imple_repeat|[Ss]atellite/));
-		next LINE if (($nonTE eq "no_nonTE") && ($Rclass =~ /nonTE/));
-		next LINE if (($nonTE eq "no_low") && ($Rclass =~ /[Ll]ow_complexity|[Ss]imple_repeat/));
+		next LINE if ($nonTE eq "none" && $Rclass =~ /nonTE|snRNA|rRNA|tRNA|snoRNA|scRNA|srpRNA|[Ll]ow_complexity|[Ss]imple_repeat|[Ss]atellite/);
+		next LINE if ($nonTE eq "no_nonTE" && $Rclass =~ /nonTE/);
+		next LINE if ($nonTE eq "no_low" && $Rclass =~ /[Ll]ow_complexity|[Ss]imple_repeat/);
 
 		#filter out stuff from -filter if relevant
 		if ($filter ne "na") {				
@@ -340,31 +343,37 @@ sub load_closest_tss {
 		chomp(my $l = $_);
 		my @l = split('\s+',$l);
 		#chr19	3000005	3000195	470;23.0;4.5;2.7;chr19;3000005;3000195;(58431371);+;IAPLTR3-int;LTR/ERVK;5531;5745;(1076);2062961	.	+	chr19	3137089	3137091	tss_116236	-	136895
-		$closest{$l[0]}{$l[3]}=$l[-1]; #key = chr, then RM line, value = distance to TSS	
+		$closest{$l[0]}{$l[3]}=$l[-1]; #key = chr, then RM line, value = distance to TSS
 	}
 	return (\%closest);
 }
 
 #-----------------------------------------------------------------------------
 sub prep_out {
-	my ($type,$dir,$nboot,$filter,$input,$stype,$nonTE,$linc,$prot,$shuffle) = @_;	
+	my ($type,$dir,$nboot,$filter,$input,$stype,$nonTE,$keep,$linc,$prot,$shuffle) = @_;
 	#common steps
 	my ($f_type,$f_name) = split(",",$filter) unless ($filter eq "na");		
 	my $inputname = filename($input);
 	my $stats;
-	($filter eq "na")?($stats = "$dir/$inputname.shuffle-$stype.nonTE-$nonTE.boot-$nboot.stats.tab"):
-                      ($stats = "$dir/$inputname.shuffle-$stype.nonTE-$nonTE.boot-$nboot.$f_name.stats.tab");		
-	`rm -Rf $dir.previous` if ((-e $dir) && (-e $dir.".previous"));
+	my $distrib = "na";
+	($filter eq "na")?($stats = "$dir/$inputname.shuffle-$stype.nonTE-$nonTE.boot-$nboot"):
+                      ($stats = "$dir/$inputname.shuffle-$stype.nonTE-$nonTE.boot-$nboot.$f_name");		
+	`rm -Rf $dir.previous` if (-e $dir && -e $dir.".previous");
 	`mv $dir $dir.previous` if (-e $dir);
 	`mkdir $dir`;
+	if ($keep ne "none") {
+		$distrib = $stats.".distributions";
+		`mkdir $distrib`;
+	}
+	$stats = $stats.".stats.tab";
 	#bed type - fewer directories
 	if ($type eq "bed") {
 		my ($out,$outb,$temp) = ("$dir/$inputname.no_boot","$dir/$inputname.boot","$dir/$inputname.temp");
 		`mkdir $temp` if ($nboot > 0);
-		return ($stats,$out,$outb,$temp);
+		return ($stats,$distrib,$out,$outb,$temp);
 	} 
 	#tr type - more directories
-	if ($type eq "tr") {
+	elsif ($type eq "tr") {
 		my $lincname = filename($linc);
 		my $protname = filename($prot);
 		my ($outl,$outlb,$temp_l) = ("$dir/$lincname.no_boot","$dir/$lincname.boot","$dir/$lincname.temp");
@@ -374,7 +383,7 @@ sub prep_out {
 		my $shufname = filename($shuffle);
 		my $temp = "$dir/$shufname.temp";
 		`mkdir $temp` if ($nboot > 0);
-		return ($stats,$outl,$outlb,$temp_l,$outp,$outpb,$temp_p,$temp);
+		return ($stats,$distrib,$outl,$outlb,$temp_l,$outp,$outpb,$temp_p,$temp);
 	}
 	return 1;
 }	
@@ -461,8 +470,7 @@ sub correct_coords {
 	my ($pst,$pen) = ($st,$en);
 	#first, kick it on the other side if it was a tss and super far away (otherwise better to shift)
 	if ($tss) {
-		print STDERR "     WARN: distance to TSS is so large ($dist nt) that once randomized this TE: $te\n";
-		print STDERR "           got out of the sequence (st=$pst and en=$pen) => placed on the other side of the tss\n";		
+		print STDERR "     WARN: distance to TSS is so large ($dist nt) that once randomized this TE: $te got out of the sequence (st=$pst and en=$pen) => placed on the other side of the tss\n";		
 		if ($en < 0) {
 			$st = $tss+abs($dist);
 			$en = $tss+abs($dist)+$len;
@@ -471,10 +479,9 @@ sub correct_coords {
 			$st = $tss-abs($dist)-$len;
 			$en = $tss-abs($dist);	
 		}
-		print STDERR "           but that was still out, so was shifted to be inside the scaffold/chromosome\n" if ($st < 0 || $en > $max);
+		print STDERR "     WARN:    but that was still out, so was shifted to be inside the scaffold/chromosome\n" if ($st < 0 || $en > $max);
 	} else {
-		print STDERR "     WARN: TE might be quite large ($te) that once randomized the start ($st) or end ($en) were out of the chromosome\n";
-		print STDERR "           => was shifted to be inside the scaffold/chromosome\n";
+		print STDERR "     WARN: TE might be quite large ($te) that once randomized the start ($st) or end ($en) were out of the chromosome => was shifted to be inside the scaffold/chromosome\n";
 	}
 	#Now keep going if st or en are still out
 	if ($st < 0) {
@@ -527,16 +534,18 @@ sub get_avg_and_sd{
 	my $total = 0;
 	VALA: foreach (@$data) {
 		my $val = $_;
-		print STDERR "UNDEF in sub get_avg_and_sd\n" unless ($_);
-#		print Dumper($data) unless ($_);
-#		next VALA unless ($_);
+		unless ($_) {
+			print STDERR "WARN: UNDEF value in sub TEshuffle::get_avg_and_sd, skipping it\n";
+#			print Dumper($data);
+			next VALA;
+		}	
 		$total += $val;
 	}
 	my $avg = $total / @$data;
 
 	my $sqtotal = 0;
 	VALM: foreach(@$data) {
-#		next VALM unless ($_);
+		next VALM unless ($_);
 		$sqtotal += ($avg-$_) ** 2;
 	}
 	my $sd = ($sqtotal / (@$data-1)) ** 0.5;
@@ -629,7 +638,7 @@ sub binomial_test_R {
 sub check_binom_values {
 	my ($k1,$k2,$k3,$x,$p,$n) = @_;
 	my $skip = "n";
-	return("y") if ($p == 0);
+	return("y") if (! $p || $p == 0);
 	if (! $n || $n == 0) {
 		print STDERR "        WARN: no value for total number (from parsed RM table), for {$k1}{$k2}{$k3}? => no binomial test\n";
 		$skip = "y";
@@ -645,5 +654,26 @@ sub check_binom_values {
 	return $skip;
 }
 
+#-----------------------------------------------------------------------------
+sub print_distrib {
+	my ($data,$out,$type,$cat,$k1,$k2,$k3) = @_;
+	my $outf;
+	if ($k1) {
+		$k1 =~ s/\//_/g;
+		$k2 =~ s/\//_/g;
+		$k3 =~ s/\//_/g;
+		$outf = "$out/$type.$cat.$k1.$k2.$k3.distrib.txt";
+	} else {
+		$outf = "$out/$type.$cat.distrib.txt";
+	}
+	open (my $fh, ">", $outf) or confess "ERROR (sub TEShuffle::print_distrib): can't open to write $outf $!\n";	
+		foreach my $exp (@{$data}) {
+			print $fh "$exp\n";		
+	}				
+	close $fh;
+	return 1;
+}
+
+#-----------------------------------------------------------------------------
 #ensure last returned value is true (to load as require in scripts)
 1;

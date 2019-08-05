@@ -9,7 +9,6 @@ use warnings;
 use Carp;
 use Getopt::Long;
 use Bio::SeqIO;
-use Statistics::R; #required to get the Binomial Test p-values
 use Data::Dumper;
 use vars qw($BIN);
 use Cwd 'abs_path';
@@ -19,6 +18,7 @@ BEGIN {
 	unshift(@INC, "$BIN/Lib");
 }
 use TEshuffle;
+use Statistics::R; #required to get the Binomial Test p-values
 
 #-------------------------------------------------------------------------------
 #------------------------------- DESCRIPTION -----------------------------------
@@ -26,7 +26,7 @@ use TEshuffle;
 #flush buffer
 $| = 1;
 
-my $VERSION = "4.4";
+my $VERSION = "4.4.2";
 my $SCRIPTNAME = "TE-analysis_Shuffle_bed.pl";
 my $CHANGELOG;
 set_chlog();
@@ -72,6 +72,17 @@ $CHANGELOG = "
 #           Change for -s tss: if the TE ends up out of the scaffold/chr, put on the other side and if still out, shift it to be inside
 #           Also, skip if not in the annotation file
 #           Make -r mandatory for all
+#  - v4.4.1 = Oct 02 2018
+#           Change how the id is set in sub check_for_overlap, to avoid uninitialized errors if the input is a 3 columns bed file
+#           Citation edit in the usage
+#           Clarify option -d for the -s bed
+#  - v4.4.2 = Aug 05 2019
+#           Small edits in TEshuffle::RMtobed
+#           Load Statistics::R after the Lib path is set
+#           Fixed some uninitialized values for the total count of observed when overlap is only seen in the expected
+
+
+#TO DO: add the -keep option. 
 \n";
 	return 1;
 }
@@ -96,13 +107,13 @@ Synopsis (v$VERSION):
     perl $SCRIPTNAME -f features.bed -q rm.out -r genome.sizes -s bed -e genome.gaps
 	
    CITATION:
-    - include the version of the script + link to the GitHub page (https://github.com/4ureliek/TEanalysis)
+    - Include the version of the script + link to the GitHub page (https://github.com/4ureliek/TEanalysis)
     - Cite Kapusta et al. (2013) PLoS Genetics (DOI: 10.1371/journal.pgen.1003470)
         (http://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1003470)
-      Also cite Trizzani, Kapusta and Brown (2018) BioRxiv if possible 
-        (https://www.biorxiv.org/content/early/2018/02/20/268771 - https://doi.org/10.1101/268771)
-    - for BEDtools, please cite 
-      Quinlan AR and Hall IM (2010) Bioinformatics (DOI: 10.1093/bioinformatics/btq033)
+      If relevant or space allows, please cite Trizzani, Kapusta and Brown (2018) BMC Genomics
+        (https://doi.org/10.1186/s12864-018-4850-3), for which the script was updated
+    - For BEDtools, please cite the version + Quinlan AR and Hall IM (2010) Bioinformatics 
+        (https://doi.org/10.1093/bioinformatics/btq033)
 
    DESCRIPTION:
     Features provided in -s will be overlapped with -f file (which must be simple intervals in bed format), 
@@ -174,9 +185,10 @@ Synopsis (v$VERSION):
                                         (this can be changed in the shuffle subroutine).
 
    OPTIONAL ARGUMENTS IF USING -s bed:
-    -d,--dogaps   => (BOOL)   See above; use this and provide the genome fasta file if no gap file (-g)
-                              If several files in -e, then the genome needs to be the first one.
-                              This step is not optimized, it will take a while (but will create the required file)                       
+    -d,--dogaps   => (BOOL)   If no available gap file, give the genome fasta file for -e, and
+                              set this option. The script will create the gaps and use it; but
+                              if several files in -e, then the genome needs to be the first one.
+                              This step is not optimized, it will take a while.                  
     -i,--incl     => (STRING) To use as -incl for bedtools shuffle: \"coordinates in which features from -i should be placed.\"
                               Bed of gff format. Could be intervals close to TSS for example.
                               More than one file (same format) may be provided (comma separated), 
@@ -191,9 +203,9 @@ Synopsis (v$VERSION):
     -o,--overlap  => (INT)    Minimal length (in nt) of intersection in order to consider the TE included in the feature.
                               Default = 10 (to match the TEanalysis-pipeline.pl)
     -n,--nboot    => (STRING) number of bootsraps with shuffled -s file
-                              Default = 100 for faster runs; use higher -n for good pvalues 
+                              Default = 10 for faster runs; use higher -n for good pvalues 
                               (-n 10000 is best for permutation test but this will take a while)
-                              If set to 0, no bootstrap will be done
+                              If set to 0, no bootstrap will be done (this would be to get the observed values / test run)
     -w,--where    => (STRING) if BEDtools are not in your path, provide path to BEDtools bin directory                             
 
    OPTIONAL ARGUMENTS FOR TE FILTERING (for all -s): 
@@ -238,26 +250,27 @@ my $NONTE = "no_low";
 my $FILTER = "na";
 my $TEAGE = "na";
 my $BEDTOOLS = "";
+my $KEEP = "none";
 GetOptions(
 	  'feat=s'		=> \$IN,
-	  'query=s'     => \$SHUFFLE,
-	  'shuffle=s'   => \$STYPE,
-	  'overlap=s'   => \$INTERS,
-	  'nboot=s'     => \$NBOOT,
-	  'annot=s'     => \$TSSFILE,			 	  
-	  'range=s'     => \$BUILD,
-	  'build'       => \$DOBUILD,
+	  'query=s'    => \$SHUFFLE,
+	  'shuffle=s'  => \$STYPE,
+	  'overlap=s'  => \$INTERS,
+	  'nboot=s'    => \$NBOOT,
+	  'annot=s'    => \$TSSFILE,			 	  
+	  'range=s'    => \$BUILD,
+	  'build'      => \$DOBUILD,
 	  'excl=s'		=> \$EXCLUDE,
-	  'dogaps'      => \$DOGAPS,
+	  'dogaps'     => \$DOGAPS,
 	  'incl=s'		=> \$INCL,
-	  'x'		    => \$NOOVERLAPS,
+	  'x'		      => \$NOOVERLAPS,
 	  'low=s'		=> \$NONTE,
-	  'te=s'		=> \$FILTER,
-	  'contain'     => \$F_REGEX,
-	  'group=s'     => \$TEAGE,
-	  'where=s'     => \$BEDTOOLS,
-	  'version'     => \$V,
-	  'help'		=> \$HELP,);
+	  'te=s'		   => \$FILTER,
+	  'contain'    => \$F_REGEX,
+	  'group=s'    => \$TEAGE,
+	  'where=s'    => \$BEDTOOLS,
+	  'version'    => \$V,
+	  'help'		   => \$HELP,);
 
 #Check options, if files exist, etc
 check_options();
@@ -304,15 +317,16 @@ print STDERR "     input file = $IN\n";
 print STDERR "     features to shuffle = $SHUFFLE\n";
 print STDERR "     shuffling type = $STYPE\n";
 print STDERR "     genome chromosome sizes = $BUILD\n";
-my $BEDV = `$BEDTOOLS bedtools --version`;
-chomp $BEDV;
-print STDERR "     bedtools version = $BEDV\n";
+my $BEDV = $BEDTOOLS."bedtools --version";
+my $BEDVER = `$BEDV`;
+chomp $BEDVER;
+print STDERR "     bedtools version = $BEDVER\n";
 
 #Prep outputs
 print STDERR " --- prepping output directories and files\n";
 my $DIR = $IN.".shuffle-".$STYPE.".".$NBOOT;
 print STDERR "     output directory = $DIR\n";
-my ($STATS,$OUT,$OUTB,$TEMP) = TEshuffle::prep_out("bed",$DIR,$NBOOT,$FILTER,$IN,$STYPE,$NONTE);
+my ($STATS,$DISTRIB,$OUT,$OUTB,$TEMP) = TEshuffle::prep_out("bed",$DIR,$NBOOT,$FILTER,$IN,$STYPE,$NONTE,$KEEP);
 
 #Chosomosome sizes / Genome range
 my ($OKSEQ,$BUILD_FILE);
@@ -462,7 +476,7 @@ exit;
 #-------------------------------------------------------------------------------
 sub get_features_info {
 	my $nb = `grep -c -E "\\w" $IN`;
-#	my $len = `more $file | awk '{SUM += (\$3-\$2)} END {print SUM}'`; #this assumes no overlaps, trusting user for now
+#	my $len = `cat $file | awk '{SUM += (\$3-\$2)} END {print SUM}'`; #this assumes no overlaps, trusting user for now
 	chomp($nb);
 #	chomp($len);
 	$IN_FEAT{'nb'} = $nb;
@@ -488,7 +502,8 @@ sub check_for_overlap {
 		my $Rnam = $rm[9];
 		$Rnam =~ s/\//_/; #making sure no / in repeat name
 		my ($Rcla,$Rfam) = TEshuffle::get_Rclass_Rfam($Rnam,$rm[10]);
-		my $id = $l[9]."#".$l[6]."#".$l[7]."#".$l[8];
+		my $id = $l[6]."#".$l[7]."#".$l[8];
+		$id = $l[9]."#".$id if ($l[9]);
 		$id = $id."#".$l[11] if ($l[11]);
 		
 		#Increment in the data structure, but only if feature not already counted for this category
@@ -600,9 +615,10 @@ sub print_stats {
 		foreach my $Rfam (keys %{$exp->{$Rclass}}) {			
 			foreach my $Rname (keys %{$exp->{$Rclass}{$Rfam}}) {
 				#observed
-				my ($obsnb,$obsper) = (0,0);
+				my ($obsnb,$obsper,$obstot) = (0,0,0);
 				$obsnb = $OBS->{'no_boot'}{$Rclass}{$Rfam}{$Rname}{'tot'} if ($OBS->{'no_boot'}{$Rclass}{$Rfam}{$Rname}{'tot'});
 				$obsper = $obsnb/$IN_FEAT{'nb'}*100 unless ($obsnb == 0);
+				$obstot = $OBS->{'no_boot'}{'tot'}{'tot'}{'tot'}{'tot'} if ($OBS->{'no_boot'}{'tot'}{'tot'}{'tot'}{'tot'});
 				#expected
 				my $expper = 0;
 				my $expavg = $exp->{$Rclass}{$Rfam}{$Rname}{'avg'};	
@@ -612,7 +628,7 @@ sub print_stats {
 				$pval_nb = "na" if ($expavg == 0 && $obsnb == 0);									
 				#Now print stuff
 				print $fh "$Rclass\t$Rfam\t$Rname\t";
-				print $fh "$obsnb\t$obsper\t$OBS->{'no_boot'}{'tot'}{'tot'}{'tot'}{'tot'}\t"; 
+				print $fh "$obsnb\t$obsper\t$obstot\t"; 
 				print $fh "$PARSEDRM->{$Rclass}{$Rfam}{$Rname}\t"; 
 				print $fh "$expavg\t$exp->{$Rclass}{$Rfam}{$Rname}{'sd'}\t$expper\t$exp->{'tot'}{'tot'}{'tot'}{'avg'}\t";			
 				my $sign = TEshuffle::get_sign($pval_nb);				

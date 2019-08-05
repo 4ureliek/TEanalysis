@@ -83,13 +83,13 @@ my $summary = load_summary($dir) unless ($bed); #no summary files when -f bed
 
 #Loading any CAT-class files
 print STDERR " --- Loading *.concat.CAT-class.tab files\n";
-`cat $dir/*.CAT-class.tab > $dir/_concat.CAT-class.tab` if (($bed) && (! -e "$dir/_concat.CAT-class.tab"));
+`cat $dir/*.CAT-class.tab > $dir/_concat.CAT-class.tab` if ($bed && ! -e "$dir/_concat.CAT-class.tab");
 my @files = `ls $dir | grep "concat.CAT-class.tab"`;
 my $class = load_cat($dir,\@files);
 
 #Loading any CAT files
 print STDERR " --- Loading *.concat.CAT.tab files\n";
-`cat $dir/*.CAT.tab > $dir/_concat.CAT.tab` if (($bed) && (! -e "$dir/_concat.CAT.tab"));
+`cat $dir/*.CAT.tab > $dir/_concat.CAT.tab` if ($bed && ! -e "$dir/_concat.CAT.tab");
 @files = `ls $dir | grep "concat.CAT.tab"`;
 my $cat = load_cat($dir,\@files); #same sub works, even if it will fo the totlen 2 times
 
