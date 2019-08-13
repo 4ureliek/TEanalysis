@@ -26,7 +26,7 @@ use Data::Dumper;
 select((select(STDERR), $|=1)[0]); #make STDERR buffer flush immediately
 select((select(STDOUT), $|=1)[0]); #make STDOUT buffer flush immediately
 
-my $version = "4.15";
+my $version = "4.16";
 my $changelog;
 set_changelog();
 sub set_changelog { 
@@ -84,6 +84,9 @@ sub set_changelog {
 #          - Few cosmetic changes
 #   v4.15 = 24 & 26 Jul 2018
 #          - small bug fix to avoid dying at the TEratio printing step when a repeat is not in the parsedRM file
+#   v4.16 = 15 Aug 2018
+#          - fixed that -parse option thing, since the format is more strict now (8 columns input file).
+#          - bug fix introduced with v4.14 for parsedRM file loading, if old parsedRM format the masked length was 0
 
 # TO DO: 
 #  - check what is used in TEinfoRMP, remove useless stuff 
@@ -192,8 +195,8 @@ sub set_usage {
                               This will exclude all lincRNAs but keep all the non coding stuff, unless they are < 200nt [should exclude all small RNAs]
     -parse     => OPT - (STRING) to filter on a specific column before joining with TEs, to keep lines where <filter> is found in the column <col>
                          Can be used ONLY on added columns. Lines not matching it won't be printed at all in any of the files.
-                         Typically, this allows to quickly check if some subsets differ (ex: -addcol 10 -parse 10,liver) 
-                         if column 10 has the tissue of max. expression
+                         Typically, this allows to quickly check if some subsets differ (ex: -addcol 9,10,11 -parse 10,liver) 
+                         if column 10 has the tissue of maximum expression in the original file.
     -cut       => OPT - (STRING) to set size of intergenic regions analyzed (downstream and upstream), in nt
                          Default = 10000,5000,1000
     -v         => OPT - (BOOL) chose this to make the script talk to you
@@ -521,7 +524,7 @@ my $set = set($ft,$myf,$v);
 #extract all relevant info from the input file; if -f gtf => make Exon Structure file + get up/dw etc
 #####################################################
 foreach my $in (@listin) {
-	print " --- Dealing with $in " if (($v) && ($dir));
+	print "\n --- Dealing with $in " if (($v) && ($dir));
 	my $addn = "$fname.$pname";
 	my $listtojoin = ();
 	my $listoffiles = ();
@@ -705,7 +708,7 @@ transcript_type = 8   #can be same as gene biotype
 #----------------------------------------------------------------------------
 sub get_TEs_infos {
 	my ($in,$v) = @_;
-	print STDERR "\n --- Loading TE info from $in\n" if ($v);
+	print STDERR " --- Loading TE info from $in\n" if ($v);
 	my %TEs = ();
 	my %TE_RMP = ();
 	open(my $in_fh, "<", $in) or confess "\n   ERROR (sub get_TEs_infos): could not open to read $in $!\n";
@@ -719,7 +722,7 @@ sub get_TEs_infos {
 			$ifn = "n";
 		}	
 		$i++;
-		next LINE if ($line !~ /\w/ || substr($line,0,5) eq "Rname" || substr($line,0,1) eq "#");
+		next LINE if ($line !~ /\w/ || substr($line,0,5) eq "Rname" || substr($line,0,1) eq "#");		
 		my @TEs = split('\t', $line); 
 		
 		#Deal with name, class, fam:
@@ -760,13 +763,13 @@ sub get_TEs_infos {
 			} else {
 				($frg,$frgnr,$ad) = ($TEs[5+$r],$TEs[7+$r],$TEs[8+$r]);
 				($len,$pgm) = ($TEs[14+$r],$TEs[17+$r]);
-				if ($TEs[14+$r] && $TEs[15+$r]) {
-					($leno,$pgmo) = ($TEs[14+$r],$TEs[15+$r]);
+				if ($TEs[18+$r] && $TEs[19+$r]) {
+					($leno,$pgmo) = ($TEs[18+$r],$TEs[19+$r]);
 				} else {
 					($leno,$pgmo) = (0,0);
 				}
 			}
-			
+
 			if ($pgm eq "nd") {
 				print STDERR "     /!\\ The % of the genome covered by each repeat is missing in $in\n";
 				print STDERR "          Please rerun parseRM.pl with the -f option\n";
@@ -777,8 +780,8 @@ sub get_TEs_infos {
 			#edit the list	
 			#class famm class/fam frg nr_frg avg%div len_masked %genome_masked len_overlap %genome_overlap(for this repeat) 
 			@TEs = ($Rc,$Rf,$Rcf,$frg,$frgnr,$ad,$len,$pgm,$leno,$pgmo);			
-		
-			#load TE_RMP hash			
+					
+			#load TE_RMP hash		
 			$TE_RMP{'l'}{lc($Rn)}+=($len-$leno);
 			$TE_RMP{'p'}{lc($Rn)}+=($pgm-$pgmo);
 			$TE_RMP{'cnr'}{lc($Rn)}+=$frgnr;
@@ -790,7 +793,7 @@ sub get_TEs_infos {
 	}	
 	close $in_fh;
 	if ($in =~ /.parseRM.*.tab$/) {
-		return (\%TEs,\%TE_RMP);
+		return (\%TEs,\%TE_RMP);		
 	} else {
 		return \%TEs;
 	}
@@ -802,11 +805,15 @@ sub get_TEs_infos {
 # called by main
 #----------------------------------------------------------------------------
 sub RMtobed {
-	my ($RMout,$base,$TEinfoRMP,$TEinfo,$nonTE,$gb,$v) = @_;
+	my ($RMout,$base,$TEinfoRMP,$TEinfo,$nonTE,$v) = @_;
 	my $bed = $RMout;
 	$bed =~ s/(.*)\.out$/$1/;
-	((! $TEinfo->{"na"}) || (! $TEinfoRMP->{"na"}))?($bed = $bed.".class.nonTE-$nonTE.bed"):($bed = $bed.".nonTE-$nonTE.bed");	
-	print STDERR "\n --- Converting $RMout to bed\n" if ($v);
+	if (! $TEinfo->{"na"} || ! $TEinfoRMP->{"na"}) {
+		$bed = $bed.".class.nonTE-$nonTE.bed"; 
+	} else {
+		$bed = $bed.".nonTE-$nonTE.bed";	
+	}
+	print STDERR " --- Converting $RMout to bed\n" if ($v);
 	unless (-e $bed) {
 		print STDERR "     Filtering nonTE repeats based on -nonTE: $nonTE\n" if ($v);
 		print STDERR "     Updating TE class and family based on -TE\n" if ($v && ! $TEinfo->{"na"});
@@ -824,16 +831,15 @@ sub RMtobed {
 			
 			#now get the TE info hash, unless already defined for this element.
 			#in older libraries there were repeats with same name but different classfam - well if it happens then the first occurence will be the one in the hash
-			my ($Rclass,$Rfam,$Rclassfam);
-			($Rclass,$Rfam,$Rclassfam) = get_Rclass_Rfam($l[10],$l[9]);
+			my ($Rclass,$Rfam,$Rclassfam) = get_Rclass_Rfam($l[10],$l[9]);
 			my $rname = lc($l[9]);
-			
+						
 			#update class and family if relevant (will have the additional --int)
 			if ($TEinfo->{$rname}) {
-				($Rclass,$Rfam,$Rclassfam) = ($TEinfo->{$rname}[0],$TEinfo->{$rname}[1],$TEinfo->{$rname}[2]);
+				($Rclass,$Rfam,$Rclassfam) = ($TEinfo->{$rname}[0],$TEinfo->{$rname}[1],$TEinfo->{$rname}[2]);	
 			} elsif ($TEinfoRMP->{$rname}) { #use this only if not in $TEinfo
 				($Rclass,$Rfam,$Rclassfam) = ($TEinfoRMP->{$rname}[0],$TEinfoRMP->{$rname}[1],$TEinfoRMP->{$rname}[2]);
-			}	
+			}		
 			
 			#now filter non TE or not, based on -nonTE value
 			next LINE if (($nonTE eq "none") && ($Rclass =~ /nonTE|snRNA|rRNA|tRNA|snoRNA|scRNA|srpRNA|[Ll]ow_complexity|[Ss]imple_repeat|[Ss]atellite|ARTEFACT/));
@@ -1122,7 +1128,7 @@ sub get_gtf_values {
              'transcript_name' => "na",
              'gene_type' => "na",
              'transcript_type' => "na");
-	if ($set{"info"}) { #if that's define, means it is gtf format and not the -myf
+	if ($set{"info"}) { #if that's defined, means it is gtf format and not the -myf
 		my $info = $line[$set{"info"}];
 		my @info = split(';',$info);
 		for (my $i = 0; $i <= $#info; $i++) {
@@ -1171,11 +1177,7 @@ sub get_gtf_values {
 # called by main
 #----------------------------------------------------------------------------
 sub get_tr_infos {
-	my ($in,$set,$name,$filter,$addcol,$parse,$addn,$TrMatLen,$v) = @_;
-	my ($fcol,$fname) = split (",",$filter);
-	my ($pcol,$pname) = split (",",$parse);
-	my @addcol = ();
-	($addcol eq "na")?($addcol[0] = $addcol):(@addcol = split(",",$addcol));
+	my ($in,$set,$name,$filter,$addcol,$parse,$addn,$TrMatLen,$v) = @_;	
 	my $ExSt = "$name.ExSt.$addn.tab";
 	my %pc = ();
 	my %TrInfos = ();
@@ -1208,41 +1210,24 @@ sub get_tr_infos {
 		my $currID = $tr_id_full."#".$chr.":".$currstart."-".$currend;
 		
 		#Filter out if relevant: -filter
+		my ($fcol,$fname) = split (",",$filter);
 		#1) deal with the special filter = intragenic: if non coding and not lncRNA and not < 200 nt => keep
-		next LINE if (($TrMatLen->{$tr_id_full}) && ($filtering ne "protein_coding") && ($fname eq "intragenic") && ($filtering ne "lincRNA") && ($TrMatLen->{$tr_id_full} <= 200));
+		next LINE if ($TrMatLen->{$tr_id_full} && $filtering ne "protein_coding" && $fname eq "intragenic" && $filtering ne "lincRNA" && $TrMatLen->{$tr_id_full} <= 200);
 		#2) simply filter out if it does not match
 		next LINE if (($filter ne "all,all") && ($fname ne $filtering));
 				
-				
-		#NEED TO FIX THIS TIHNG HERE... 
-				
-				
 		#Filter out if relevant: -parse	
 		if ($parse ne "all,all" && $addcol ne "na") {
-#			print STDERR "parse = $parse\n";
+			my ($pcol,$pname) = split (",",$parse);
 			my $skip = 1;
-			my @cols = @{$colstoadd};
-			#start looping end of usual file
 			my @line = split('\t',$line);
-#			print STDERR "\n$line\n";
-			my $st = $#line - $#cols;
-#			print STDERR "st = $st = $#line - $#cols\n";
-#			print STDERR "colstoadd = @cols\n";
-			for (my $i = 0; $i <= $#cols; $i ++) {
-				my $value = $cols[$i];
-				my $add = $i + $st;
-#				print STDERR "add = $add ($i + $st?)\n";
-#				print STDERR "is pcol($pcol) eq add($add) ? && pname($pname) eq val($value) ?\n";
-				if ($pcol eq $add && $pname eq $value) {
-					$skip = 0;
-					last;
-				}
+			if ($line[$pcol] ne $pname) {
+				next LINE;
 			}
-			next LINE if ($skip == 1); #filter only if correct column
 		}
 				
 		#OK, carry on now
-		#store the whole "line"
+		#store the whole "line", with the added columns
 		my @forbig = ($chr,$type,$feat,$currstart,$currend,$strand,$gene_id,$tr_id,$gene_name,$tr_name,$gene_type,$tr_type);
 		if ($addcol ne "na") {
 			foreach my $col (@{$colstoadd}) {
@@ -2375,14 +2360,12 @@ sub print_OUT {
 		$totlenTEs+=$TEcat->{'lf'}{$id};
 		my ($Rname,$Rclass,$Rfam) = split(/#|\//,$id);	
 		if ($RMPARSED) {
-			if ($TE_RMP->{'l'}{lc($Rname)}) {
+			if (defined $TE_RMP->{'l'}{lc($Rname)}) {
                 $totGlenTEs+=$TE_RMP->{'l'}{lc($Rname)};
                 $totGnrTEs+=$TE_RMP->{'cnr'}{lc($Rname)};
             } else {
-            	unless ($TE_RMP->{'l'}{lc($Rname)}) {
-					print STDERR "            WARN: $Rname#$Rclass/$Rfam is in the RMout but not in the parsedRM file\n";
-					print STDERR "                  (/!\\ this will generate \"0\" or \"na\" values in the TE ratio file)\n";
-				}	
+				print STDERR "            WARN: $Rname#$Rclass/$Rfam is in the RMout but not in the parsedRM file\n";
+				print STDERR "                  (/!\\ this will generate \"0\" or \"na\" values in the TE ratio file)\n";
             }
 		}              
 	}		
